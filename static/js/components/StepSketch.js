@@ -14,6 +14,7 @@ export const StepSketch = {
     const message = ref("");
     const error = ref(null);
     const hasDrawing = ref(false);
+    const uploadCleaned = ref(false);
     let ctx = null;
     let drawing = false;
 
@@ -43,6 +44,7 @@ export const StepSketch = {
     function start(event) {
       drawing = true;
       hasDrawing.value = true;
+      uploadCleaned.value = false;
       const { x, y } = positionOf(event);
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -62,25 +64,28 @@ export const StepSketch = {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.value.width, canvas.value.height);
       hasDrawing.value = false;
+      uploadCleaned.value = false;
     }
 
-    function loadFile(event) {
-      const file = event.target.files?.[0];
-      if (!file) return;
-      const image = new Image();
-      image.onload = () => {
-        clear();
-        // Fit the upload inside the square without distorting it.
-        const scale = Math.min(canvas.value.width / image.width,
-                               canvas.value.height / image.height);
-        const w = image.width * scale;
-        const h = image.height * scale;
-        ctx.drawImage(image, (canvas.value.width - w) / 2,
-                      (canvas.value.height - h) / 2, w, h);
-        hasDrawing.value = true;
-        URL.revokeObjectURL(image.src);
-      };
-      image.src = URL.createObjectURL(file);
+    function drawBlobToCanvas(blob) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          clear();
+          // Fit the upload inside the square without distorting it.
+          const scale = Math.min(canvas.value.width / image.width,
+                                 canvas.value.height / image.height);
+          const w = image.width * scale;
+          const h = image.height * scale;
+          ctx.drawImage(image, (canvas.value.width - w) / 2,
+                        (canvas.value.height - h) / 2, w, h);
+          hasDrawing.value = true;
+          URL.revokeObjectURL(image.src);
+          resolve();
+        };
+        image.onerror = () => reject(new Error("Failed to load the selected file"));
+        image.src = URL.createObjectURL(blob);
+      });
     }
 
     async function cleanUpDrawing(blob) {
@@ -88,11 +93,32 @@ export const StepSketch = {
       try {
         const { extractLineDrawing } = await import("/js/pipeline/pipeline.js");
         const { outputBlob } = await extractLineDrawing(blob);
-        return outputBlob;
+        return { blob: outputBlob, cleaned: true };
       } catch (err) {
         // A pipeline bug shouldn't block Phase 1 — fall back to the raw capture.
         console.warn("Line-extraction pipeline failed, using raw drawing:", err);
-        return blob;
+        return { blob, cleaned: false };
+      } finally {
+        message.value = "";
+      }
+    }
+
+    async function loadFile(event) {
+      const file = event.target.files?.[0];
+      if (!file) return;
+      busy.value = true;
+      error.value = null;
+      try {
+        const { blob, cleaned } = await cleanUpDrawing(file);
+        await drawBlobToCanvas(blob);
+        // Skip cleaning it again on submit — the canvas already holds the
+        // pipeline's output (or, if the pipeline failed, the raw upload).
+        uploadCleaned.value = cleaned;
+      } catch (err) {
+        error.value = err.message;
+      } finally {
+        busy.value = false;
+        event.target.value = "";
       }
     }
 
@@ -103,7 +129,7 @@ export const StepSketch = {
       try {
         const raw = await new Promise((resolve) =>
           canvas.value.toBlob(resolve, "image/png"));
-        const blob = await cleanUpDrawing(raw);
+        const blob = uploadCleaned.value ? raw : (await cleanUpDrawing(raw)).blob;
         const avatar = await api.createAvatar(blob, (fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
@@ -140,7 +166,8 @@ export const StepSketch = {
             <button class="ghost" @click="clear">Clear</button>
             <label class="ghost file">
               Upload a photo
-              <input type="file" accept="image/*" @change="loadFile" hidden>
+              <input type="file" accept="image/*" :disabled="busy"
+                     @change="loadFile" hidden>
             </label>
             <button class="primary" :disabled="!hasDrawing || busy"
                     @click="bringToLife">
