@@ -106,8 +106,32 @@ static/
   js/api.js         every fetch call
   js/viewport.js    three.js; renders procedural rigs and GLBs alike
   js/components/    one per screen
+  js/pipeline/      built line-extraction bundle (generated, see below)
+pipeline/           line-extraction source + tests (see below)
 tests/test_contract.py
 ```
+
+## Image pipeline
+
+`static/js/components/StepSketch.js` runs every drawing/photo through a
+browser-side OpenCV.js pipeline (`pipeline/src/pipeline.ts`'s
+`extractLineDrawing()`) before sending it to `/api/avatars` — perspective
+correction, denoise, illumination normalization, binarize, stroke cleanup —
+so the (currently mock) rigger receives a clean line drawing rather than a
+raw photo.
+
+This is the one piece of Node tooling in an otherwise build-free app,
+kept isolated in `pipeline/` on purpose:
+
+```bash
+cd pipeline
+npm install
+npm test              # vitest — per-stage unit tests + a golden-image e2e test
+npm run build         # bundles to ../static/js/pipeline/pipeline.js
+```
+
+`static/js/pipeline/pipeline.js` is a committed, vendored build artifact —
+rebuild and commit it after editing anything under `pipeline/src/`.
 
 ## Not built
 
