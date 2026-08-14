@@ -27,18 +27,16 @@ import map in `static/index.html`.
 
 ## Deploy
 
-Dokku, via the `Procfile` / `.python-version` / `CHECKS` in this repo:
+Heroku, via the `Procfile` / `.python-version` / `app.json` in this repo:
 
 ```bash
-dokku apps:create avatar-trainer
-dokku ps:scale avatar-trainer web=1          # must stay 1 — the store is in memory
-dokku nginx:set avatar-trainer proxy-read-timeout 3600s   # the training stream is SSE
-
-git remote add dokku dokku@YOUR_SERVER:avatar-trainer
-git push dokku HEAD:refs/heads/main
+heroku create avatar-trainer
+heroku ps:scale web=1            # must stay 1 — the store is in memory
+git push heroku HEAD:main        # Heroku only builds its default branch
 ```
 
-Full notes, including why one process and how SSE survives the proxy:
+Use a Basic dyno or higher: Eco dynos sleep, and sleeping loses every avatar.
+Full notes, including why one dyno and how SSE survives the router timeouts:
 [docs/deploy.md](docs/deploy.md).
 
 ## Providers
