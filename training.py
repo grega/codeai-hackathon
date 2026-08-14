@@ -15,6 +15,7 @@ import traceback
 from typing import Any, Iterator
 
 import config
+from logs import log
 from schemas import (
     Clip,
     ContractError,
@@ -105,15 +106,15 @@ class TrainingRun:
             self.status = "stopped" if self._stop.is_set() else "done"
         except ProviderError as exc:
             self.status, self.error = "error", exc.user_message
-            print(f"[run {self.id}] provider error: {exc.detail or exc}")
+            log(f"[run {self.id}] provider error: {exc.detail or exc}")
         except ContractError as exc:
             self.status = "error"
             self.error = ("The training service sent back something I didn't "
                           "understand. Check the server log.")
-            print(f"[run {self.id}] CONTRACT VIOLATION: {exc}")
+            log(f"[run {self.id}] CONTRACT VIOLATION: {exc}")
         except Exception:  # noqa: BLE001 - last line of defence
             self.status, self.error = "error", "Training stopped unexpectedly."
-            print(f"[run {self.id}] unexpected error:\n{traceback.format_exc()}")
+            log(f"[run {self.id}] unexpected error:\n{traceback.format_exc()}")
         finally:
             with self._cond:
                 self._finished = True

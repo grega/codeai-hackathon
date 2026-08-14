@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from logs import log
 from schemas import ContractError, ProviderError
 
 _JOB_LIMIT = 200
@@ -81,7 +82,7 @@ class JobRunner:
                 job.status = "error"
                 job.error = exc.user_message
                 job.detail = exc.detail
-                print(f"[job {job.id}] provider error: {exc.detail or exc}")
+                log(f"[job {job.id}] provider error: {exc.detail or exc}")
             except ContractError as exc:
                 # A provider returned something the contract forbids. This is a
                 # bug in that provider, so name it loudly in the server log.
@@ -89,12 +90,12 @@ class JobRunner:
                 job.error = ("The avatar service sent back something I didn't "
                              "understand. Check the server log.")
                 job.detail = str(exc)
-                print(f"[job {job.id}] CONTRACT VIOLATION: {exc}")
+                log(f"[job {job.id}] CONTRACT VIOLATION: {exc}")
             except Exception as exc:  # noqa: BLE001 - last line of defence
                 job.status = "error"
                 job.error = "Something went wrong. Try again?"
                 job.detail = str(exc)
-                print(f"[job {job.id}] unexpected error:\n{traceback.format_exc()}")
+                log(f"[job {job.id}] unexpected error:\n{traceback.format_exc()}")
 
         threading.Thread(target=run, name=f"job-{job.id}", daemon=True).start()
         return job

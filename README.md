@@ -63,6 +63,31 @@ The UI status bar shows which are active. Adding one:
 Other vars: `EPISODE_RATE` (episodes/sec at speed 1, default 20), `DATA_DIR`,
 `MAX_UPLOAD_BYTES`.
 
+## Bedrock prompt endpoint
+
+`POST /api/llm/generate` runs a prompt against a Bedrock model for the teams
+building the real providers. It costs money, so it is **off until configured**
+and returns 404 to anyone without the token.
+
+```bash
+export LLM_API_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+export BEDROCK_ALLOWED_MODELS="<model-id>,<model-id>"   # empty = refuse everything
+export AWS_DEFAULT_REGION=eu-west-1
+
+curl -s localhost:5000/api/llm/generate \
+  -H "Authorization: Bearer $LLM_API_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model_id":"<model-id>","prompt":"Say hello","max_tokens":100}'
+```
+
+`GET /api/llm/models` lists what this deployment allows and your current
+rate-limit usage. Find the model IDs for your account and region with
+`aws bedrock list-inference-profiles --region "$AWS_DEFAULT_REGION"`.
+
+**The token is server-side only — never ship it to the browser.** The frontend
+does not call this endpoint. Details, including the threat model:
+[docs/llm-endpoint.md](docs/llm-endpoint.md).
+
 ## Layout
 
 ```

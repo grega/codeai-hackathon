@@ -143,12 +143,25 @@ slug.
 | `AWS_ACCESS_KEY_ID` | — | " |
 | `AWS_SECRET_ACCESS_KEY` | — | " |
 | `AWS_SESSION_TOKEN` | — | temporary credentials only; omit for long-lived IAM keys |
+| `LLM_API_TOKEN` | — | **unset = the Bedrock endpoint returns 404.** Server-side only |
+| `BEDROCK_ALLOWED_MODELS` | — | comma-separated; **empty = every model refused** |
+| `BEDROCK_REGION` | `AWS_DEFAULT_REGION` | only if Bedrock is elsewhere |
+| `BEDROCK_MAX_TOKENS` | `4096` | ceiling whatever the caller asks for |
+| `BEDROCK_MAX_PROMPT_CHARS` | `20000` | prompt size limit |
+| `LLM_RATE_PER_MINUTE` | `10` | per caller |
+| `LLM_RATE_PER_DAY` | `500` | whole deployment — this bounds the bill |
 | `PORT` | — | set by Heroku |
 
-The AWS variables need no code here — boto3 and the AWS SDKs read them from the
-environment themselves. `.env` is loaded at `config` import, which happens before
-any provider is constructed, so a provider creating a boto3 client at import time
-still sees them.
+The Bedrock prompt endpoint is off unless `LLM_API_TOKEN` **and**
+`BEDROCK_ALLOWED_MODELS` are both set — see [llm-endpoint.md](llm-endpoint.md).
+Its rate limits are per-process and in memory, which is sound on one dyno and
+would need Redis if that ever changes.
 
-`boto3` is deliberately **not** in `requirements.txt` — add it when a provider
-actually needs it rather than shipping an unused dependency in the slug.
+The AWS variables need no code here — boto3 reads them from the environment
+itself. `.env` is loaded at `config` import, which happens before any provider
+or Bedrock client is constructed, so anything creating a boto3 client at import
+time still sees them.
+
+`boto3` is in `requirements.txt` for the Bedrock endpoint. The client is built
+lazily on first use, so the app starts and serves the avatar experience fine on
+a machine with no AWS credentials at all.
