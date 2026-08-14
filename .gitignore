@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Runtime data — uploaded sketches and anything else the store writes.
+# Nothing in here is source; the app recreates it on demand.
+/data/
+
+# Environment / secrets. Real providers will need API keys; keep them out.
+.env
+.env.*
+!.env.example
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node — for tooling someone may add later; the frontend needs no build today.
+node_modules/
