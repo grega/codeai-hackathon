@@ -13,10 +13,10 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { samplePose } from "./pose.js";
 
-const BODY_COLOUR = 0x5b7cfa;
-const GHOST_COLOUR = 0x94a3b8;
-const HEAT_COLD = new THREE.Color(0x22c55e); // on target
-const HEAT_HOT = new THREE.Color(0xef4444);  // way off
+const BODY_COLOUR = 0x6c5ce7;
+const GHOST_COLOUR = 0xb6c2e1;
+const HEAT_COLD = new THREE.Color(0x23c48a); // on target
+const HEAT_HOT = new THREE.Color(0xff6b6b);  // way off
 
 export class Viewport {
   constructor(canvas, { ghost = false } = {}) {
@@ -64,7 +64,7 @@ export class Viewport {
   }
 
   #addGround() {
-    const grid = new THREE.GridHelper(6, 12, 0xcbd5e1, 0xe2e8f0);
+    const grid = new THREE.GridHelper(6, 12, 0xc3cdea, 0xd9e0f5);
     grid.position.y = -0.001;
     grid.material.transparent = true;
     grid.material.opacity = 0.55;

@@ -10,11 +10,11 @@
 import { onMounted, ref, watch } from "vue";
 
 const COLOURS = {
-  reward: "#5b7cfa",
-  best: "#16a34a",
-  match: "#f59e0b",
-  grid: "#e2e8f0",
-  axis: "#94a3b8",
+  reward: "#6c5ce7",
+  best: "#14a06a",
+  match: "#f0a020",
+  grid: "#d9e0f5",
+  axis: "#6a7196",
 };
 
 export const RewardChart = {
@@ -95,9 +95,9 @@ export const RewardChart = {
     <div class="chart">
       <canvas ref="canvas"></canvas>
       <div class="chart-key">
-        <span><i style="background:#16a34a"></i>best score</span>
-        <span><i style="background:#5b7cfa"></i>score each try</span>
-        <span><i style="background:#f59e0b"></i>match to target</span>
+        <span><i style="background:#14a06a"></i>best score</span>
+        <span><i style="background:#6c5ce7"></i>score each try</span>
+        <span><i style="background:#f0a020"></i>match to target</span>
       </div>
     </div>
   `,
