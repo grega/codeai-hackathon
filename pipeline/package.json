@@ -1,0 +1,29 @@
+{
+  "name": "pipeline",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Browser-side line-extraction pipeline (OpenCV.js). Builds to ../static/js/pipeline for the main Flask app to serve as a plain static file.",
+  "scripts": {
+    "build": "vite build",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:update-goldens": "UPDATE_GOLDENS=1 vitest run pipeline.e2e",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@techstark/opencv-js": "^5.0.0-release.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "@types/pixelmatch": "^5.2.6",
+    "@types/pngjs": "^6.0.5",
+    "canvas": "^3.2.3",
+    "jsdom": "^30.0.1",
+    "pixelmatch": "^7.2.0",
+    "pngjs": "^7.0.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.2.0",
+    "vitest": "^4.1.10"
+  }
+}

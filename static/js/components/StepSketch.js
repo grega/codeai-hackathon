@@ -83,13 +83,27 @@ export const StepSketch = {
       image.src = URL.createObjectURL(file);
     }
 
+    async function cleanUpDrawing(blob) {
+      message.value = "Cleaning up your drawing...";
+      try {
+        const { extractLineDrawing } = await import("/js/pipeline/pipeline.js");
+        const { outputBlob } = await extractLineDrawing(blob);
+        return outputBlob;
+      } catch (err) {
+        // A pipeline bug shouldn't block Phase 1 — fall back to the raw capture.
+        console.warn("Line-extraction pipeline failed, using raw drawing:", err);
+        return blob;
+      }
+    }
+
     async function bringToLife() {
       busy.value = true;
       error.value = null;
       progress.value = 0;
       try {
-        const blob = await new Promise((resolve) =>
+        const raw = await new Promise((resolve) =>
           canvas.value.toBlob(resolve, "image/png"));
+        const blob = await cleanUpDrawing(raw);
         const avatar = await api.createAvatar(blob, (fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
