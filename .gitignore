@@ -29,3 +29,6 @@ Thumbs.db
 
 # Node — for tooling someone may add later; the frontend needs no build today.
 node_modules/
+
+# Generated animation .glb files — reproducible from rigged_human.glb + a prompt.
+/phase2/output/
