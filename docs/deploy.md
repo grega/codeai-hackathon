@@ -116,7 +116,20 @@ Then click through all four screens. The status bar shows which providers are
 mock and which are real, so what the deploy is actually running is never in
 doubt.
 
-## Config reference
+## Config
+
+Locally, copy `.env.example` to `.env`. On Heroku use config vars:
+
+```bash
+heroku config:set PROVIDER_POSING=real AWS_DEFAULT_REGION=eu-west-1
+heroku config                                  # what is currently set
+```
+
+`config.py` loads `.env` without overwriting anything already in the
+environment, so the precedence is **real environment > `.env` > defaults**. That
+is what makes one file work in both places: Heroku config vars arrive as real
+environment variables and win, and `.env` is gitignored so it never reaches the
+slug.
 
 | Var | Default | Notes |
 |---|---|---|
@@ -126,4 +139,16 @@ doubt.
 | `EPISODE_RATE` | `20` | episodes/sec at speed 1; higher means more work per trainee |
 | `DATA_DIR` | `./data` | upload location |
 | `MAX_UPLOAD_BYTES` | `8388608` | 8MB |
+| `AWS_DEFAULT_REGION` | — | read by boto3, not by this repo |
+| `AWS_ACCESS_KEY_ID` | — | " |
+| `AWS_SECRET_ACCESS_KEY` | — | " |
+| `AWS_SESSION_TOKEN` | — | temporary credentials only; omit for long-lived IAM keys |
 | `PORT` | — | set by Heroku |
+
+The AWS variables need no code here — boto3 and the AWS SDKs read them from the
+environment themselves. `.env` is loaded at `config` import, which happens before
+any provider is constructed, so a provider creating a boto3 client at import time
+still sees them.
+
+`boto3` is deliberately **not** in `requirements.txt` — add it when a provider
+actually needs it rather than shipping an unused dependency in the slug.

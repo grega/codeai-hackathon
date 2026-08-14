@@ -10,7 +10,11 @@ Python is pinned with [asdf](https://asdf-vm.com).
 asdf install                                  # python 3.13.9, per .tool-versions
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
+cp .env.example .env                          # optional; all vars have defaults
 ```
+
+`.env` is gitignored and never overrides a real environment variable, so the
+same config works locally and as Heroku config vars.
 
 ## Run
 

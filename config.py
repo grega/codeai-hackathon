@@ -10,7 +10,21 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 ROOT = Path(__file__).parent
+
+# Local development defaults, from .env in the repo root.
+#
+# load_dotenv does not overwrite variables that are already set, so the
+# precedence is: real environment > .env > the defaults below. That is what lets
+# the same file work on Heroku — config vars arrive as real environment
+# variables and win, and .env is not in the slug anyway.
+#
+# This has to run before the os.environ reads below. `flask run` also loads .env
+# by itself once python-dotenv is installed, but gunicorn and pytest do not,
+# which is why it is explicit here.
+load_dotenv(ROOT / ".env")
 DATA_DIR = Path(os.environ.get("DATA_DIR", ROOT / "data"))
 UPLOAD_DIR = DATA_DIR / "uploads"
 
