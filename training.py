@@ -127,22 +127,38 @@ class TrainingRun:
             self._cond.notify_all()
 
     # -- stream ----------------------------------------------------------
-    def events(self) -> Iterator[Episode]:
+    #: Emit a keepalive if nothing has been produced for this long. A paused run
+    #: sends no bytes at all, and an idle connection is closed by nginx (60s by
+    #: default) — which the browser then reconnects, replaying the whole curve.
+    KEEPALIVE_SECONDS = 15.0
+
+    def events(self) -> Iterator[Episode | None]:
         """Yield every episode of this run, from the beginning, exactly once.
 
         Starting from the beginning matters: the browser attaches its
         EventSource a moment after POSTing the run, and losing the first few
         episodes would put a visible notch in the learning curve.
+
+        Yields None as a keepalive tick; the caller turns that into an SSE
+        comment. Callers should tolerate it.
         """
         index = 0
+        last_sent = time.monotonic()
         while True:
             with self._cond:
                 while index >= len(self._history) and not self._finished:
                     self._cond.wait(timeout=1.0)
-                if index >= len(self._history) and self._finished:
-                    return
+                    if time.monotonic() - last_sent >= self.KEEPALIVE_SECONDS:
+                        break
+                if index >= len(self._history):
+                    if self._finished:
+                        return
+                    last_sent = time.monotonic()
+                    yield None
+                    continue
                 batch = self._history[index:]
                 index = len(self._history)
+            last_sent = time.monotonic()
             yield from batch
 
     def to_json(self) -> dict[str, Any]:

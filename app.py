@@ -221,10 +221,17 @@ def stream_run(run_id: str):
         return fail("That training run doesn't exist.", 404)
 
     def generate():
+        # Flush a comment straight away so the proxy commits to the response
+        # and the browser's EventSource opens rather than sitting on a buffer.
+        yield ": open\n\n"
         for episode in run.events():
-            yield f"event: episode\ndata: {json.dumps(episode.to_json())}\n\n"
-        yield ("event: end\ndata: "
-               f"{json.dumps(run.to_json())}\n\n")
+            if episode is None:
+                yield ": keepalive\n\n"
+                continue
+            # The id lets a reconnecting browser tell us where it got to.
+            yield (f"id: {episode.episode}\n"
+                   f"event: episode\ndata: {json.dumps(episode.to_json())}\n\n")
+        yield f"event: end\ndata: {json.dumps(run.to_json())}\n\n"
 
     return Response(generate(), mimetype="text/event-stream", headers={
         "Cache-Control": "no-cache",

@@ -86,7 +86,17 @@ export const api = {
    */
   streamRun(runId, { onEpisode, onEnd, onError }) {
     const source = new EventSource(`/api/training/runs/${runId}/events`);
-    source.addEventListener("episode", (e) => onEpisode?.(JSON.parse(e.data)));
+
+    // EventSource reconnects on its own, and the server replays from episode 1,
+    // so without this guard a dropped connection redraws the whole curve on top
+    // of itself. Only shows up behind a proxy that closes idle connections.
+    let lastEpisode = 0;
+    source.addEventListener("episode", (e) => {
+      const episode = JSON.parse(e.data);
+      if (episode.episode <= lastEpisode) return;
+      lastEpisode = episode.episode;
+      onEpisode?.(episode);
+    });
     source.addEventListener("end", (e) => {
       onEnd?.(JSON.parse(e.data));
       source.close();
