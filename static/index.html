@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Train Your Avatar</title>
+<link rel="stylesheet" href="/css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>🤖</text></svg>">
+
+<!--
+  Vue and three.js load as ES modules straight from a CDN via this import map,
+  which is why `import { ref } from 'vue'` resolves in the browser as-is. To
+  move versions, change them here and nowhere else.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "vue": "https://unpkg.com/vue@3.5.13/dist/vue.esm-browser.prod.js",
+    "three": "https://unpkg.com/three@0.170.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+  <div id="app">
+    <!-- Shown until Vue mounts; replaced entirely by the app component. -->
+    <div class="boot">Loading…</div>
+  </div>
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>
