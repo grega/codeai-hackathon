@@ -25,6 +25,22 @@ mid-session loses the current avatar. Drop the flag when demoing.
 No npm install and no build step — Vue and three.js load from a CDN via the
 import map in `static/index.html`.
 
+## Deploy
+
+Dokku, via the `Procfile` / `.python-version` / `CHECKS` in this repo:
+
+```bash
+dokku apps:create avatar-trainer
+dokku ps:scale avatar-trainer web=1          # must stay 1 — the store is in memory
+dokku nginx:set avatar-trainer proxy-read-timeout 3600s   # the training stream is SSE
+
+git remote add dokku dokku@YOUR_SERVER:avatar-trainer
+git push dokku HEAD:refs/heads/main
+```
+
+Full notes, including why one process and how SSE survives the proxy:
+[docs/deploy.md](docs/deploy.md).
+
 ## Providers
 
 Each phase reads a `mock`/`real` env var, independently:

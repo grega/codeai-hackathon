@@ -1,0 +1,32 @@
+{
+  "name": "Train Your Avatar",
+  "description": "Draw a character, teach it a move, then train it with a reward you control. An AI/ML learning experience for 11-14 year olds.",
+  "repository": "https://github.com/grega/codeai-hackathon",
+  "keywords": ["education", "machine-learning", "flask", "vue", "three.js"],
+  "stack": "heroku-24",
+  "buildpacks": [{ "url": "heroku/python" }],
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
+  "env": {
+    "PROVIDER_RIGGING": {
+      "description": "Sketch to rigged avatar. 'mock' or 'real'.",
+      "value": "mock"
+    },
+    "PROVIDER_POSING": {
+      "description": "Prompt to pose. 'mock' or 'real'.",
+      "value": "mock"
+    },
+    "PROVIDER_TRAINING": {
+      "description": "Reinforcement training. 'mock' or 'real'.",
+      "value": "mock"
+    },
+    "EPISODE_RATE": {
+      "description": "Training episodes streamed per second at speed 1.",
+      "value": "20"
+    }
+  }
+}

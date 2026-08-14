@@ -1,7 +1,0 @@
-# Dokku zero-downtime deploy checks.
-WAIT=3
-ATTEMPTS=10
-
-# The schema endpoint exercises the app itself, not just the web server:
-# it reads the bone tree and resolves the configured providers.
-/api/schema L_shoulder

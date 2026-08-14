@@ -67,6 +67,7 @@ class Store:
         self.clips: dict[str, Clip] = {}
         self.behaviours: dict[str, Behaviour] = {}
         self.runs: dict[str, Any] = {}  # run_id -> TrainingRun (see training.py)
+        self._run_order: list[str] = []
 
     # -- avatars ---------------------------------------------------------
     def add_avatar(self, rig: Rig, image_bytes: bytes | None = None,
@@ -116,9 +117,23 @@ class Store:
         return items
 
     # -- runs ------------------------------------------------------------
+    #: Runs are the only records big enough to matter: each keeps every episode
+    #: it produced so a browser can attach late and still draw the whole curve.
+    #: At the 5000-episode ceiling that is tens of MB, and a class retraining all
+    #: afternoon would accumulate them until the dyno is killed for memory. Keep
+    #: a working set and drop the rest.
+    MAX_RUNS = 20
+
     def add_run(self, run: Any) -> Any:
         with self._lock:
             self.runs[run.id] = run
+            self._run_order.append(run.id)
+            while len(self._run_order) > self.MAX_RUNS:
+                evicted = self.runs.pop(self._run_order.pop(0), None)
+                # Stop it first, or its worker thread keeps producing episodes
+                # into a run nothing can reach any more.
+                if evicted is not None:
+                    evicted.stop()
         return run
 
     def get_run(self, run_id: str) -> Any | None:
