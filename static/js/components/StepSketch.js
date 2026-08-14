@@ -15,6 +15,7 @@ export const StepSketch = {
     const error = ref(null);
     const hasDrawing = ref(false);
     const uploadCleaned = ref(false);
+    const renderPrompt = ref("");
     let ctx = null;
     let drawing = false;
 
@@ -144,7 +145,7 @@ export const StepSketch = {
     }
 
     return {
-      canvas, busy, progress, message, error, hasDrawing, state,
+      canvas, busy, progress, message, error, hasDrawing, renderPrompt, state,
       start, move, end, clear, loadFile, bringToLife,
       percent: computed(() => Math.round(progress.value * 100)),
     };
@@ -183,6 +184,12 @@ export const StepSketch = {
         </div>
 
         <div class="panel">
+          <h4>Rendering prompt</h4>
+          <input v-model="renderPrompt" type="text"
+                 placeholder="e.g. a friendly robot with a cape, bold colors">
+          <p class="muted">Guides the model that will render your line drawing
+             into the final avatar. Not wired up yet.</p>
+
           <AvatarCanvas v-if="state.avatar" :rig="state.avatar.rig"
                         label="Your avatar" />
           <div v-else class="placeholder">
