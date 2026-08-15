@@ -33,6 +33,18 @@ PROVIDER_RIGGING = os.environ.get("PROVIDER_RIGGING", "mock")
 PROVIDER_POSING = os.environ.get("PROVIDER_POSING", "mock")
 PROVIDER_TRAINING = os.environ.get("PROVIDER_TRAINING", "mock")
 
+#: Server-to-server auto-rigging service. The browser never receives this URL.
+RIGGING_SERVICE_URL = os.environ.get("RIGGING_SERVICE_URL", "").strip().rstrip("/")
+
+#: Overall deadline for classify, mesh generation, joint inference, rigging,
+#: and the final GLB download.
+RIGGING_SERVICE_TIMEOUT = float(
+    os.environ.get("RIGGING_SERVICE_TIMEOUT", "300"))
+
+#: Delay between remote mesh/rig task status checks.
+RIGGING_POLL_INTERVAL = float(
+    os.environ.get("RIGGING_POLL_INTERVAL", "2"))
+
 #: Episodes per second pushed to the browser at speed 1.0. The training screen
 #: multiplies this by its speed control.
 EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
