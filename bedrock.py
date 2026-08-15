@@ -17,6 +17,8 @@ provider here rather than a change to this one.
 
 from __future__ import annotations
 
+import base64
+import json
 import threading
 
 import config
@@ -147,6 +149,62 @@ def converse(model_id: str, prompt: str, *, system: str | None = None,
             "output_tokens": usage.get("outputTokens"),
             "total_tokens": usage.get("totalTokens"),
         },
+    }
+
+
+def render_sketch(image_bytes: bytes, prompt: str, *,
+                   control_strength: float = 0.7,
+                   negative_prompt: str | None = None,
+                   seed: int = 0,
+                   output_format: str = "png") -> dict:
+    """Render a line drawing into a finished image via Stability's Control
+    Sketch service.
+
+    Unlike ``converse()`` this goes through ``invoke_model`` rather than the
+    Converse API — Control Sketch is image-conditioned (the drawing's lines
+    shape the output directly), which Converse has no request shape for.
+    There is no caller-selectable ``model_id``: this always calls
+    ``config.BEDROCK_RENDER_MODEL_ID``.
+    """
+    payload: dict[str, object] = {
+        "image": base64.b64encode(image_bytes).decode("ascii"),
+        "prompt": prompt,
+        "control_strength": max(0.0, min(float(control_strength), 1.0)),
+        "output_format": output_format,
+    }
+    if negative_prompt:
+        payload["negative_prompt"] = negative_prompt
+    if seed:
+        payload["seed"] = int(seed)
+
+    client = _get_client()
+    try:
+        response = client.invoke_model(
+            modelId=config.BEDROCK_RENDER_MODEL_ID,
+            body=json.dumps(payload),
+        )
+    except Exception as exc:  # noqa: BLE001 - botocore raises a wide family
+        raise _translate(exc) from exc
+
+    body = json.loads(response["body"].read())
+
+    # null means success; anything else names what got filtered.
+    finish_reason = (body.get("finish_reasons") or [None])[0]
+    if finish_reason:
+        raise BedrockError(
+            "That couldn't be rendered — try a different drawing or prompt.",
+            status=422, detail=finish_reason)
+
+    images = body.get("images") or []
+    if not images:
+        raise BedrockError(
+            "The model didn't return an image.", status=502,
+            detail=f"empty images, finish_reasons={body.get('finish_reasons')}")
+
+    return {
+        "image_bytes": base64.b64decode(images[0]),
+        "output_format": output_format,
+        "seed": (body.get("seeds") or [None])[0],
     }
 
 

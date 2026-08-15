@@ -83,5 +83,28 @@ LLM_RATE_PER_MINUTE = int(os.environ.get("LLM_RATE_PER_MINUTE", "10"))
 LLM_RATE_PER_DAY = int(os.environ.get("LLM_RATE_PER_DAY", "500"))
 
 
+# --------------------------------------------------------------------------
+# Sketch-render feature (POST /api/avatars/<id>/render)
+# --------------------------------------------------------------------------
+# A purpose-built, browser-facing endpoint — unlike the prompt endpoint above,
+# the frontend is meant to call this one. It takes a fixed shape (an avatar's
+# saved drawing plus a short prompt) and always invokes the same model, so
+# there's no caller-selectable model_id and therefore no allowlist. It still
+# shares BEDROCK_REGION/AWS credentials and fails closed the same way: no
+# region configured means bedrock._get_client() refuses before anything runs.
+
+#: Stability's Control Sketch service — image-conditioned, so the drawing's
+#: lines actually shape the output rather than just informing a text prompt.
+BEDROCK_RENDER_MODEL_ID = os.environ.get(
+    "BEDROCK_RENDER_MODEL_ID", "us.stability.stable-image-control-sketch-v1:0")
+
+#: This endpoint has no bearer token — every visitor's browser can reach it,
+#: like the rest of the avatar API — so it needs its own caps to bound the
+#: bill. Tighter than LLM_RATE_PER_* because image generation costs more per
+#: call than a short text completion.
+RENDER_RATE_PER_MINUTE = int(os.environ.get("RENDER_RATE_PER_MINUTE", "5"))
+RENDER_RATE_PER_DAY = int(os.environ.get("RENDER_RATE_PER_DAY", "50"))
+
+
 def ensure_dirs() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)

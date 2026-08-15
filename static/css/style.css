@@ -199,6 +199,11 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 }
 .sketchpad:hover { border-color: var(--brand); }
 
+.rendered-image {
+  width: 100%; display: block; margin-bottom: .9rem;
+  border-radius: var(--radius); border: var(--edge); box-shadow: var(--lift-sm);
+}
+
 /* -- 3d stage ----------------------------------------------------------- */
 .stage { position: relative; }
 .stage canvas {

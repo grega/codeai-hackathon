@@ -6,6 +6,7 @@ serialise the result — no domain logic lives here. See CONTRACT.md.
 
 from __future__ import annotations
 
+import base64
 import json
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 import bedrock
 import config
 import providers
-from auth import limiter, require_token
+from auth import RateLimiter, limiter, require_token
 from jobs import runner
 from rewards import TERM_LABELS
 from schemas import (
@@ -37,6 +38,10 @@ app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_BYTES
 app.json.sort_keys = False
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+# Separate bucket from the LLM-endpoint limiter in auth.py: this one guards a
+# route with no bearer token, so it's keyed by client address alone.
+render_limiter = RateLimiter("RENDER_RATE_PER_MINUTE", "RENDER_RATE_PER_DAY")
 
 
 # --------------------------------------------------------------------------
@@ -138,6 +143,43 @@ def get_avatar_glb(avatar_id: str):
     if not avatar or not avatar.rig.glb_bytes:
         return fail("That avatar has no GLB — it's drawn procedurally.", 404)
     return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary")
+
+
+@app.post("/api/avatars/<avatar_id>/render")
+def render_avatar(avatar_id: str):
+    """Send the avatar's line drawing plus a prompt to Bedrock and get a
+    rendered image back — a purpose-specific endpoint, not the general
+    prompt pipe at /api/llm/generate (see the note above that route)."""
+    avatar = store.get_avatar(avatar_id)
+    if not avatar or not avatar.image_path:
+        return fail("That avatar doesn't exist.", 404)
+
+    prompt = (request.json or {}).get("prompt", "").strip()
+    if not prompt:
+        return fail("Describe how you'd like this rendered.")
+    if len(prompt) > config.BEDROCK_MAX_PROMPT_CHARS:
+        return fail(f"Prompt is too long — the limit is "
+                    f"{config.BEDROCK_MAX_PROMPT_CHARS} characters.", 413)
+
+    refusal = render_limiter.check(request.remote_addr or "unknown")
+    if refusal:
+        return fail(refusal, 429)
+
+    image_bytes = Path(avatar.image_path).read_bytes()
+
+    def work(progress):
+        try:
+            result = bedrock.render_sketch(image_bytes, prompt)
+        except bedrock.BedrockError as exc:
+            raise ProviderError(exc.message, detail=exc.detail) from exc
+        return {
+            "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
+            "output_format": result["output_format"],
+            "seed": result["seed"],
+        }
+
+    job = runner.submit(work, message="Rendering your character...")
+    return jsonify(job.to_json()), 202
 
 
 # --------------------------------------------------------------------------
