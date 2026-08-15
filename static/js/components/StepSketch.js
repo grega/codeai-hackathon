@@ -2,7 +2,7 @@
 
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
-import { setAvatar, state, goTo } from "../store.js";
+import { generatePosedAvatar, setAvatar, state, goTo } from "../store.js";
 
 export const StepSketch = {
   setup() {
@@ -19,8 +19,14 @@ export const StepSketch = {
     const renderMessage = ref("");
     const renderError = ref(null);
     const renderedImage = ref(null);
+    const tool = ref("pen"); // "pen" | "eraser"
+    const undoStack = ref([]);
     let ctx = null;
     let drawing = false;
+
+    const PEN_WIDTH = 7;
+    const ERASER_WIDTH = 28;
+    const UNDO_HISTORY_LIMIT = 20;
 
     onMounted(() => {
       const el = canvas.value;
@@ -33,9 +39,24 @@ export const StepSketch = {
       ctx.fillRect(0, 0, el.width, el.height);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = "#1e293b";
-      ctx.lineWidth = 7;
     });
+
+    function pushUndoSnapshot() {
+      const el = canvas.value;
+      undoStack.value.push({
+        imageData: ctx.getImageData(0, 0, el.width, el.height),
+        hadDrawing: hasDrawing.value,
+      });
+      if (undoStack.value.length > UNDO_HISTORY_LIMIT) undoStack.value.shift();
+    }
+
+    function undo() {
+      const entry = undoStack.value.pop();
+      if (!entry) return;
+      ctx.putImageData(entry.imageData, 0, 0);
+      hasDrawing.value = entry.hadDrawing;
+      uploadCleaned.value = false;
+    }
 
     function positionOf(event) {
       const rect = canvas.value.getBoundingClientRect();
@@ -46,9 +67,12 @@ export const StepSketch = {
     }
 
     function start(event) {
+      pushUndoSnapshot();
       drawing = true;
       hasDrawing.value = true;
       uploadCleaned.value = false;
+      ctx.strokeStyle = tool.value === "eraser" ? "#ffffff" : "#1e293b";
+      ctx.lineWidth = tool.value === "eraser" ? ERASER_WIDTH : PEN_WIDTH;
       const { x, y } = positionOf(event);
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -69,6 +93,11 @@ export const StepSketch = {
       ctx.fillRect(0, 0, canvas.value.width, canvas.value.height);
       hasDrawing.value = false;
       uploadCleaned.value = false;
+    }
+
+    function clearCanvas() {
+      pushUndoSnapshot();
+      clear();
     }
 
     function drawBlobToCanvas(blob) {
@@ -110,6 +139,7 @@ export const StepSketch = {
     async function loadFile(event) {
       const file = event.target.files?.[0];
       if (!file) return;
+      pushUndoSnapshot();
       busy.value = true;
       error.value = null;
       try {
@@ -135,6 +165,9 @@ export const StepSketch = {
       // A previous render belonged to the old drawing.
       renderedImage.value = null;
       renderError.value = null;
+      // Fire-and-forget: tracked on the shared store so it survives
+      // navigating on to "Teach" rather than blocking this step's caller.
+      generatePosedAvatar();
       return avatar;
     }
 
@@ -168,6 +201,9 @@ export const StepSketch = {
         const result = await api.renderAvatar(avatar.id, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
         renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
+        // The T-pose download should reflect what was just designed here,
+        // not the plain sketch it started from — redo it against the render.
+        generatePosedAvatar();
       } catch (err) {
         renderError.value = err.message;
       } finally {
@@ -178,7 +214,8 @@ export const StepSketch = {
     return {
       canvas, busy, progress, message, error, hasDrawing, state,
       renderPrompt, renderBusy, renderError, renderedImage,
-      start, move, end, clear, loadFile, bringToLife, renderImage,
+      tool, undoStack,
+      start, move, end, clearCanvas, loadFile, bringToLife, renderImage, undo,
       percent: computed(() => Math.round(progress.value * 100)),
       renderPercent: computed(() => Math.round(renderProgress.value * 100)),
       renderMessage,
@@ -197,8 +234,30 @@ export const StepSketch = {
           <canvas ref="canvas" class="sketchpad"
                   @pointerdown="start" @pointermove="move"
                   @pointerup="end" @pointerleave="end"></canvas>
+          <div class="tool-toggle">
+            <button :class="{ active: tool === 'pen' }" title="Pen"
+                    aria-label="Pen" @click="tool = 'pen'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .622.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+                <path d="m15 5 4 4"/>
+              </svg>
+            </button>
+            <button :class="{ active: tool === 'eraser' }" title="Eraser"
+                    aria-label="Eraser" @click="tool = 'eraser'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>
+                <path d="M22 21H7"/>
+                <path d="m5 11 9 9"/>
+              </svg>
+            </button>
+          </div>
           <div class="row">
-            <button class="ghost" @click="clear">Clear</button>
+            <button class="ghost" :disabled="!undoStack.length" @click="undo">Undo</button>
+            <button class="ghost" @click="clearCanvas">Clear</button>
             <label class="ghost file">
               Upload a photo
               <input type="file" accept="image/*" :disabled="busy"
