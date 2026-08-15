@@ -53,14 +53,6 @@ export const StepPlayground = {
           <div class="row" v-if="state.activeBehaviour">
             <button class="primary" @click="render">Make a video</button>
           </div>
-
-          <div class="stub-note">
-            <h4>Coming next: environments</h4>
-            <p>This is where the avatar gets dropped into a world it hasn't seen
-               before — obstacles to get past, things to reach — and has to pick
-               which of its behaviours to use. Not built yet; the behaviours
-               above are the pieces it will choose from.</p>
-          </div>
         </div>
 
         <div class="panel">
