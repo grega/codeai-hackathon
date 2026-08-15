@@ -62,8 +62,11 @@ export const api = {
 
   getAvatar: (id) => request(`/api/avatars/${id}`),
 
-  async renderAvatar(avatarId, prompt, onProgress) {
-    const job = await request(`/api/avatars/${avatarId}/render`, json({ prompt }));
+  async renderSketch(imageBlob, prompt, onProgress) {
+    const form = new FormData();
+    form.append("image", imageBlob, "sketch.png");
+    form.append("prompt", prompt);
+    const job = await request("/api/renders", { method: "POST", body: form });
     return waitForJob(job, onProgress);
   },
 
