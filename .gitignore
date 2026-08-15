@@ -31,4 +31,4 @@ Thumbs.db
 node_modules/
 
 # Generated animation .glb files — reproducible from rigged_human.glb + a prompt.
-/phase2/output/
+/animator/output/
