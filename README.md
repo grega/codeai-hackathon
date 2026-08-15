@@ -6,7 +6,7 @@ computational exercise and generative AI collaboration.
 The experience now runs end to end:
 
 ```text
-draw -> rig -> teach -> train -> play -> render a WebM video
+draw -> render image -> rig -> teach -> train -> play -> render a WebM video
 ```
 
 Go to the [project wiki](https://github.com/grega/codeai-hackathon/wiki) for
@@ -88,7 +88,7 @@ PROVIDER_POSING=real .venv/bin/flask --app app run
 
 | Var | Phase | Interface | Mock |
 |---|---|---|---|
-| `PROVIDER_RIGGING` | 1 — sketch → rigged avatar | `Rigger` | returns the standard 16-bone figure |
+| `PROVIDER_RIGGING` | 1 — rendered image → rigged avatar | `Rigger` | returns the standard 16-bone figure |
 | `PROVIDER_POSING` | 2 — prompt → pose | `Poser` | keyword-matches hand-authored clips |
 | `PROVIDER_TRAINING` | 3–4 — train towards a pose | `Trainer` | hill-climber scored by `rewards.py` |
 
@@ -102,9 +102,10 @@ RIGGING_SERVICE_URL=https://carie-spatterdashed-vella.ngrok-free.dev \
 PROVIDER_RIGGING=real .venv/bin/flask --app app run
 ```
 
-On a cache miss it classifies the drawing, generates two T-pose augmentations,
-automatically confirms candidate A, and then runs mesh generation, joint
-inference, and rigging. Existing completed rigs skip those build steps.
+On a cache miss it classifies the rendered character image, generates two
+T-pose augmentations, automatically confirms candidate A, and then runs mesh
+generation, joint inference, and rigging. Existing completed rigs skip those
+build steps.
 
 `RIGGING_SERVICE_TIMEOUT` is the overall remote deadline (default 300 seconds)
 including augmentation, and `RIGGING_POLL_INTERVAL` controls mesh/rig status
@@ -165,10 +166,10 @@ tests/test_contract.py
 
 `static/js/components/StepSketch.js` runs every drawing/photo through a
 browser-side OpenCV.js pipeline (`pipeline/src/pipeline.ts`'s
-`extractLineDrawing()`) before sending it to `/api/avatars` — perspective
-correction, denoise, illumination normalization, binarize, stroke cleanup —
-so the (currently mock) rigger receives a clean line drawing rather than a
-raw photo.
+`extractLineDrawing()`) before sending it to `/api/renders` — perspective
+correction, denoise, illumination normalization, binarize, stroke cleanup.
+The rendered PNG returned by that endpoint is then sent to `/api/avatars`, so
+the rigger receives the designed character shown in the preview.
 
 This is the one piece of Node tooling in an otherwise build-free app,
 kept isolated in `pipeline/` on purpose:

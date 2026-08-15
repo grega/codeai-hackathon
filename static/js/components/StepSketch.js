@@ -2,7 +2,7 @@
 
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
-import { generatePosedAvatar, setAvatar, state, goTo } from "../store.js";
+import { generatePosedAvatar, setAvatar, goTo } from "../store.js";
 
 export const StepSketch = {
   setup() {
@@ -22,6 +22,7 @@ export const StepSketch = {
     const renderedImage = ref(null);
     const tool = ref("pen"); // "pen" | "eraser"
     const undoStack = ref([]);
+    let renderedBlob = null;
     let ctx = null;
     let drawing = false;
 
@@ -179,6 +180,7 @@ export const StepSketch = {
     }
 
     function clearRenderedImage() {
+      renderedBlob = null;
       renderedImage.value = null;
       renderError.value = null;
     }
@@ -189,24 +191,25 @@ export const StepSketch = {
       return uploadCleaned.value ? raw : (await cleanUpDrawing(raw, report)).blob;
     }
 
-    async function createAvatarFromDrawing(drawingBlob, onProgress) {
-      const avatar = await api.createAvatar(drawingBlob, onProgress);
+    async function createAvatarFromImage(imageBlob, onProgress) {
+      const avatar = await api.createAvatar(imageBlob, onProgress);
       setAvatar(avatar);
       return avatar;
     }
 
     async function bringToLife() {
-      if (busy.value || renderBusy.value || glbBusy.value) return;
+      if (busy.value || renderBusy.value || glbBusy.value || !renderedBlob) return;
       busy.value = true;
       error.value = null;
       progress.value = 0;
       try {
-        const imageBlob = await drawingBlob(
-          (text) => { message.value = text; });
-        await createAvatarFromDrawing(imageBlob, (fraction, msg) => {
+        await createAvatarFromImage(renderedBlob, (fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
         });
+        // Fire-and-forget: shared state keeps the download available after
+        // navigating to Teach.
+        generatePosedAvatar();
         goTo("pose");
       } catch (err) {
         error.value = err.message;
@@ -215,26 +218,27 @@ export const StepSketch = {
       }
     }
 
+    function renderedResultBlob(result) {
+      const binary = atob(result.image_base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: `image/${result.output_format}` });
+    }
+
     async function renderImage() {
       if (renderBusy.value || busy.value || glbBusy.value
           || !renderPrompt.value.trim()
-          || (!hasDrawing.value && !state.avatar)) return;
+          || !hasDrawing.value) return;
       renderBusy.value = true;
-      renderError.value = null;
       renderProgress.value = 0;
-      renderedImage.value = null;
+      clearRenderedImage();
       try {
-        // No progress callback here: this is rigging the avatar, not
-        // rendering it, so its (mock, staged) progress messages don't
-        // belong on the render progress bar — they'd just be confusing.
-        const avatar = state.avatar || await createAvatarFromDrawing(await drawingBlob());
-        renderProgress.value = 0;
-        const result = await api.renderAvatar(avatar.id, renderPrompt.value,
+        const imageBlob = await drawingBlob(
+          (text) => { renderMessage.value = text; });
+        const result = await api.renderSketch(imageBlob, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
+        renderedBlob = renderedResultBlob(result);
         renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
-        // The T-pose download should reflect what was just designed here,
-        // not the plain sketch it started from — redo it against the render.
-        generatePosedAvatar();
       } catch (err) {
         renderError.value = err.message;
       } finally {
@@ -243,7 +247,7 @@ export const StepSketch = {
     }
 
     return {
-      canvas, busy, progress, message, error, hasDrawing, state,
+      canvas, busy, progress, message, error, hasDrawing,
       glbBusy,
       renderPrompt, renderBusy, renderError, renderedImage,
       tool, undoStack,
@@ -311,17 +315,15 @@ export const StepSketch = {
                    :disabled="renderBusy || busy || glbBusy">
             <button class="primary"
                     :disabled="renderBusy || busy || glbBusy
-                               || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
+                               || !renderPrompt.trim() || !hasDrawing"
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
           </div>
-          <p class="muted" v-if="!hasDrawing && !state.avatar">Draw something
+          <p class="muted" v-if="!hasDrawing">Draw something
              on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
-             a Bedrock image model and shows what it renders. This also
-             starts posing a downloadable version in the background — it
-             needs a render to work from, so drawing alone isn't enough.</p>
+             a Bedrock image model. The result becomes your rigged avatar.</p>
 
           <div v-if="renderBusy" class="progress">
             <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>
@@ -333,12 +335,12 @@ export const StepSketch = {
                class="rendered-image">
 
           <button class="primary"
-                  :disabled="!hasDrawing || busy || renderBusy || glbBusy"
+                  :disabled="!renderedImage || busy || renderBusy || glbBusy"
                   @click="bringToLife">
             {{ busy ? 'Working…' : 'Bring it to life' }}
           </button>
-          <p class="muted">Builds a rigged skeleton directly from your drawing,
-             then opens Teach.</p>
+          <p class="muted">Render your character, then build its skeleton and
+             open Teach.</p>
 
           <div v-if="busy" class="progress">
             <div class="progress-bar" :style="{ width: percent + '%' }"></div>

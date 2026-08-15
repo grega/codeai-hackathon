@@ -57,10 +57,8 @@ export function canEnter(step) {
   return false;
 }
 
-// Bumped by every generatePosedAvatar() call (and on a new avatar) so an
-// older in-flight job — from the raw sketch, superseded by one from a
-// render, or from a since-replaced avatar — can tell it's been superseded
-// and drop its result instead of clobbering a newer one that finished first.
+// Bumped by every generatePosedAvatar() call (and on a new avatar) so a job
+// for a since-replaced avatar cannot clobber the current result.
 let tposeGeneration = 0;
 
 export function setAvatar(avatar) {
@@ -75,10 +73,7 @@ export function setAvatar(avatar) {
 
 /** Kick off the T-pose transform for the current avatar. Fire-and-forget —
  * callers don't await this, so it runs in the background while the wizard
- * moves on; progress is tracked on state.tpose instead of a return value.
- * Always starts a fresh job rather than skipping while one is running: a
- * render finishing while the sketch-based job is still in flight needs its
- * own job, not to be dropped waiting for the stale one. */
+ * moves on; progress is tracked on state.tpose instead of a return value. */
 export async function generatePosedAvatar() {
   if (!state.avatar) return;
   const generation = ++tposeGeneration;

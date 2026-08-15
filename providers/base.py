@@ -27,11 +27,11 @@ Progress = Callable[[float, str], None]
 
 
 class Rigger(ABC):
-    """Phase 1: a drawing becomes a rigged avatar."""
+    """Phase 1: a rendered character image becomes a rigged avatar."""
 
     @abstractmethod
     def rig(self, image_bytes: bytes, mime: str, progress: Progress) -> Rig:
-        """Turn a sketch into a Rig.
+        """Turn a rendered character image into a Rig.
 
         Return ``Rig(format="procedural", ...)`` to let the browser draw the
         figure from the bone tree, or ``Rig(format="glb", glb_bytes=...)`` with

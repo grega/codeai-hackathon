@@ -301,12 +301,12 @@ PROVIDER_POSING=real flask --app app run
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/schema` | bone tree, rest pose, reward labels, active providers |
-| POST | `/api/avatars` | multipart `image` → job |
+| POST | `/api/renders` | multipart `image`, `prompt` → job → rendered PNG |
+| POST | `/api/avatars` | multipart rendered `image` → rigging job |
 | GET | `/api/avatars/<id>` | avatar record including rig |
-| GET | `/api/avatars/<id>/image` | the original drawing |
+| GET | `/api/avatars/<id>/image` | the rendered image supplied to rigging |
 | GET | `/api/avatars/<id>/glb` | GLB bytes when `format == "glb"` |
-| POST | `/api/avatars/<id>/render` | `{prompt}` → job → rendered PNG |
-| POST | `/api/avatars/<id>/tpose` | job → forward-facing, T-pose, transparent PNG, built from the last `/render` output (400 if nothing's been rendered yet) |
+| POST | `/api/avatars/<id>/tpose` | job → forward-facing, T-pose, transparent PNG, built from the image supplied to rigging |
 | POST | `/api/avatars/<id>/poses` | `{prompt}` → job → clip |
 | GET | `/api/clips/<id>` | a clip |
 | GET | `/api/jobs/<id>` | `{status, progress, message, result, error}` |
