@@ -28,7 +28,7 @@
     spinner.className = "spinner";
     document.body.appendChild(spinner);
     const msg = document.createElement("div");
-    msg.textContent = `Generating "${prompt || ""}"...`;
+    msg.textContent = prompt ? `Generating "${prompt}"...` : "Generating...";
     document.body.appendChild(msg);
   }
 </script>
