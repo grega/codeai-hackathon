@@ -60,6 +60,12 @@ export const api = {
     return waitForJob(job, onProgress);
   },
 
+  async sideloadAvatar(glbFile) {
+    const form = new FormData();
+    form.append("glb", glbFile, glbFile.name || "avatar.glb");
+    return request("/api/avatars/glb", { method: "POST", body: form });
+  },
+
   getAvatar: (id) => request(`/api/avatars/${id}`),
 
   async renderAvatar(avatarId, prompt, onProgress) {

@@ -51,6 +51,9 @@ def read_glb(data: bytes) -> tuple[dict[str, Any], bytes]:
                        "no unpacking, but this code path expects binary)")
     if version != 2:
         raise GlbError(f"unsupported glTF version {version}")
+    if length < 12 or length > len(data):
+        raise GlbError(
+            f"invalid GLB length header ({length} bytes for a {len(data)} byte file)")
 
     document: dict[str, Any] | None = None
     binary = b""
@@ -60,9 +63,17 @@ def read_glb(data: bytes) -> tuple[dict[str, Any], bytes]:
     while offset + 8 <= end:
         chunk_len, chunk_type = struct.unpack_from("<II", data, offset)
         start = offset + 8
+        if start + chunk_len > end:
+            raise GlbError("truncated GLB chunk")
         chunk = data[start:start + chunk_len]
         if chunk_type == _CHUNK_JSON:
-            document = json.loads(chunk.decode("utf-8"))
+            try:
+                parsed = json.loads(chunk.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise GlbError(f"invalid GLB JSON: {exc}") from exc
+            if not isinstance(parsed, dict):
+                raise GlbError("GLB JSON root is not an object")
+            document = parsed
         elif chunk_type == _CHUNK_BIN:
             binary = chunk
         offset = start + chunk_len + (-chunk_len % 4)   # chunks are 4-aligned
@@ -125,7 +136,13 @@ def resolve_bones(document: dict[str, Any]) -> dict[str, int]:
 
     resolved: dict[str, int] = {}
     for bone in BONE_TREE:
-        for candidate in (bone, MIXAMO_BONE_MAP.get(bone)):
+        mixamo_name = MIXAMO_BONE_MAP.get(bone)
+        bare_mixamo_name = (
+            mixamo_name.split(":", 1)[1]
+            if mixamo_name and ":" in mixamo_name
+            else mixamo_name
+        )
+        for candidate in (bone, mixamo_name, bare_mixamo_name):
             if not candidate:
                 continue
             hit = by_name.get(candidate)
@@ -135,6 +152,47 @@ def resolve_bones(document: dict[str, Any]) -> dict[str, int]:
                 resolved[bone] = hit
                 break
     return resolved
+
+
+def validate_avatar_glb(data: bytes) -> dict[str, int]:
+    """Validate a sideloaded GLB and return its contract bone mapping.
+
+    A matching node name alone is not enough: each resolved node must also be
+    a joint in a skin, otherwise posing it would not deform the model.
+    """
+    document, _binary = read_glb(data)
+    nodes = document.get("nodes")
+    skins = document.get("skins")
+    if (not isinstance(nodes, list)
+            or not all(isinstance(node, dict) for node in nodes)):
+        raise GlbError("GLB has no valid node list")
+    if any("name" in node and not isinstance(node["name"], str) for node in nodes):
+        raise GlbError("GLB contains a node with an invalid name")
+    if not isinstance(skins, list) or not skins:
+        raise GlbError("GLB does not contain a skinned skeleton")
+
+    joint_indices: set[int] = set()
+    for skin_number, skin in enumerate(skins):
+        joints = skin.get("joints") if isinstance(skin, dict) else None
+        if not isinstance(joints, list):
+            raise GlbError(f"skin {skin_number} has no joint list")
+        for node_index in joints:
+            if (not isinstance(node_index, int) or isinstance(node_index, bool)
+                    or not 0 <= node_index < len(nodes)):
+                raise GlbError(
+                    f"skin {skin_number} references invalid joint {node_index!r}")
+            joint_indices.add(node_index)
+
+    bones = resolve_bones(document)
+    missing = [bone for bone in BONE_TREE if bone not in bones]
+    if missing:
+        raise GlbError(f"missing required joints: {', '.join(missing)}")
+
+    non_skin = [bone for bone, index in bones.items() if index not in joint_indices]
+    if non_skin:
+        raise GlbError(
+            f"required nodes are not skin joints: {', '.join(non_skin)}")
+    return bones
 
 
 # --------------------------------------------------------------------------

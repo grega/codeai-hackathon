@@ -16,14 +16,17 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 import bedrock
 import config
 import export
+import gltf
 import providers
 from auth import RateLimiter, limiter, require_token
 from jobs import runner
 from logs import log
 from rewards import TERM_LABELS
 from schemas import (
+    BONES,
     Clip,
     ProviderError,
+    Rig,
     TrainConfig,
     schema_json,
     validate_clip,
@@ -67,7 +70,7 @@ def _not_found(_):
 @app.errorhandler(413)
 def _too_large(_):
     mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
-    return fail(f"That image is too big — keep it under {mb}MB.", 413)
+    return fail(f"That upload is too big — keep it under {mb}MB.", 413)
 
 
 # --------------------------------------------------------------------------
@@ -123,6 +126,36 @@ def create_avatar():
 
     job = runner.submit(work, message="Waking up your avatar...")
     return jsonify(job.to_json()), 202
+
+
+@app.post("/api/avatars/glb")
+def sideload_avatar():
+    """Create an avatar directly from a compatible rigged GLB."""
+    # Rigged models are routinely much larger than sketch images. Override the
+    # app-wide sketch limit before Werkzeug parses the multipart body.
+    request.max_content_length = request.content_length or (1 << 63) - 1
+    upload = request.files.get("glb")
+    if upload is None:
+        return fail("No GLB was uploaded.")
+
+    glb_bytes = upload.read()
+    if not glb_bytes:
+        return fail("That GLB was empty.")
+
+    try:
+        gltf.validate_avatar_glb(glb_bytes)
+    except gltf.GlbError as exc:
+        log(f"[GLB sideload] rejected {upload.filename!r}: {exc}")
+        return fail(f"That GLB can't be used: {exc}.")
+
+    rig = validate_rig(Rig(
+        format="glb",
+        skeleton=list(BONES),
+        glb_bytes=glb_bytes,
+        notes="Sideloaded rigged GLB.",
+    ))
+    avatar = store.add_avatar(rig)
+    return jsonify(avatar.to_json()), 201
 
 
 @app.get("/api/avatars/<avatar_id>")

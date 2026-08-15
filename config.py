@@ -49,7 +49,7 @@ RIGGING_POLL_INTERVAL = float(
 #: multiplies this by its speed control.
 EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
 
-#: Max upload size for a sketch.
+#: Max upload size for a sketch. The GLB sideload route is intentionally exempt.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))
 
 #: Path to a rigged GLB the mock rigger should serve instead of the procedural
