@@ -1,10 +1,21 @@
-We think engaging learners to create and train their own model is a compelling computational exercise and generative AI collaboration
+# Train Your Avatar
 
-Go to the wiki for more information: https://github.com/grega/codeai-hackathon/wiki
+We think engaging learners to create and train their own model is a compelling
+computational exercise and generative AI collaboration.
+
+The experience now runs end to end:
+
+```text
+draw -> rig -> teach -> train -> play -> render a WebM video
+```
+
+Go to the [project wiki](https://github.com/grega/codeai-hackathon/wiki) for
+background and design notes.
 
 ## Setup
 
 Python is pinned with [asdf](https://asdf-vm.com).
+Google Chrome is required for the final video recording step.
 
 ```bash
 asdf install                                  # python 3.13.9, per .tool-versions
@@ -28,6 +39,25 @@ mid-session loses the current avatar. Drop the flag when demoing.
 
 No npm install and no build step — Vue and three.js load from a CDN via the
 import map in `static/index.html`.
+
+## Final video rendering
+
+The Render step turns a saved behaviour into a customizable five-second WebM
+video. It combines the current avatar rig with the behaviour's JSON animation
+clip, so the server does not need to bake another GLB:
+
+```text
+Rig (procedural or GLB) + Clip -> Three.js preview -> 1280x720 WebM
+```
+
+The learner can choose the move, stage lighting, and camera motion before
+recording. Rendering uses `canvas.captureStream()` and `MediaRecorder`; the
+finished video remains in the browser and is downloaded directly rather than
+uploaded to Flask.
+
+Real GLB rigs must expose the 16 contract bone names from `schemas.py`. The same
+viewport path applies the JSON clip to procedural and GLB rigs, which keeps the
+mock and real provider workflows aligned.
 
 ## Deploy
 
@@ -104,9 +134,11 @@ providers/
 static/
   index.html        importmap: vue + three
   js/api.js         every fetch call
-  js/viewport.js    three.js; renders procedural rigs and GLBs alike
+  js/viewport.js    preview + final Three.js rendering for both rig formats
+  js/recorder.js    fixed-duration browser WebM capture
   js/components/    one per screen
   js/pipeline/      built line-extraction bundle (generated, see below)
+  vendor/           browser-only WebM duration metadata helper
 pipeline/           line-extraction source + tests (see below)
 tests/test_contract.py
 ```
@@ -135,6 +167,6 @@ rebuild and commit it after editing anything under `pipeline/src/`.
 
 ## Not built
 
-Real providers, auth, persistence across restarts, mobile layout, and the
-environments themselves — the Play screen is a stub holding the behaviour
-library they will draw on.
+Real providers, user auth, persistence across restarts, and the environments
+themselves. The Play screen currently previews the behaviour library that
+future environments will draw on.

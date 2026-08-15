@@ -9,6 +9,7 @@ export const STEPS = [
   { id: "pose", label: "Teach", hint: "Describe a move" },
   { id: "train", label: "Train", hint: "Reward what you want" },
   { id: "play", label: "Play", hint: "Try it out" },
+  { id: "render", label: "Render", hint: "Make a video" },
 ];
 
 export const state = reactive({
@@ -20,6 +21,7 @@ export const state = reactive({
   clips: [],          // every move generated this session
   activeClip: null,   // the one being previewed / trained
   behaviours: [],
+  activeBehaviour: null,
   error: null,
 });
 
@@ -44,6 +46,9 @@ export function canEnter(step) {
   if (step === "pose") return Boolean(state.avatar);
   if (step === "train") return Boolean(state.avatar && state.clips.length);
   if (step === "play") return Boolean(state.avatar);
+  if (step === "render") {
+    return Boolean(state.avatar && state.behaviours.length);
+  }
   return false;
 }
 
@@ -52,6 +57,7 @@ export function setAvatar(avatar) {
   state.clips = [];
   state.activeClip = null;
   state.behaviours = [];
+  state.activeBehaviour = null;
 }
 
 export function addClip(clip) {
@@ -63,4 +69,12 @@ export async function refreshBehaviours() {
   if (!state.avatar) return;
   const { behaviours } = await api.listBehaviours(state.avatar.id);
   state.behaviours = behaviours;
+  const selectedId = state.activeBehaviour?.id;
+  state.activeBehaviour = behaviours.find((item) => item.id === selectedId)
+    || behaviours[0]
+    || null;
+}
+
+export function setActiveBehaviour(behaviour) {
+  state.activeBehaviour = behaviour;
 }
