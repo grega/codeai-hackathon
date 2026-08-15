@@ -67,6 +67,11 @@ export const api = {
     return waitForJob(job, onProgress);
   },
 
+  async tposeAvatar(avatarId, onProgress) {
+    const job = await request(`/api/avatars/${avatarId}/tpose`, { method: "POST" });
+    return waitForJob(job, onProgress);
+  },
+
   // -- phase 2 --------------------------------------------------------
   async createPose(avatarId, prompt, onProgress) {
     const job = await request(`/api/avatars/${avatarId}/poses`, json({ prompt }));

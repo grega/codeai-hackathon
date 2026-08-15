@@ -26,6 +26,11 @@ class Avatar:
     rig: Rig
     image_path: str | None = None
     name: str = "My avatar"
+    #: The most recent /render output, if any — kept in memory only (unlike
+    #: image_path, never written to disk). Whoever builds the T-pose PNG
+    #: prefers this over the raw sketch: it's what the player actually
+    #: designed, where the raw sketch is only ever plain black-on-white lines.
+    rendered_image_bytes: bytes | None = None
 
     def to_json(self) -> dict[str, Any]:
         glb_url = f"/api/avatars/{self.id}/glb" if self.rig.format == "glb" else None
@@ -89,6 +94,12 @@ class Store:
 
     def get_avatar(self, avatar_id: str) -> Avatar | None:
         return self.avatars.get(avatar_id)
+
+    def set_rendered_image(self, avatar_id: str, image_bytes: bytes) -> None:
+        with self._lock:
+            avatar = self.avatars.get(avatar_id)
+            if avatar:
+                avatar.rendered_image_bytes = image_bytes
 
     # -- clips -----------------------------------------------------------
     def add_clip(self, clip: Clip) -> Clip:

@@ -76,6 +76,8 @@ body {
 .topbar h1::before { content: "🤖 "; }
 
 .steps { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+.tpose-status { margin-left: auto; display: flex; align-items: center; }
 .step-tab {
   display: grid; grid-template-columns: auto auto; gap: 0 .55rem;
   align-items: center;
@@ -347,6 +349,12 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 .render-segmented {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
 }
+.tool-toggle { display: inline-flex; gap: .35rem; }
+.tool-toggle button {
+  width: 2.2rem; height: 2.2rem; padding: 0; border-radius: 10px;
+  display: grid; place-items: center;
+}
+.tool-toggle button.active { background: var(--brand-soft); color: var(--brand-dark); }
 .render-segmented button {
   border-radius: 0; padding: .45rem .35rem; font-size: .78rem; box-shadow: none;
 }

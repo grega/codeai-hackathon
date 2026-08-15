@@ -156,15 +156,18 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
                    control_strength: float = 0.7,
                    negative_prompt: str | None = None,
                    seed: int = 0,
-                   output_format: str = "png") -> dict:
+                   output_format: str = "png",
+                   model_id: str | None = None) -> dict:
     """Render a line drawing into a finished image via Stability's Control
     Sketch service.
 
     Unlike ``converse()`` this goes through ``invoke_model`` rather than the
     Converse API — Control Sketch is image-conditioned (the drawing's lines
     shape the output directly), which Converse has no request shape for.
-    There is no caller-selectable ``model_id``: this always calls
-    ``config.BEDROCK_RENDER_MODEL_ID``.
+    There is no caller-selectable ``model_id`` from the browser's point of
+    view: it defaults to ``config.BEDROCK_RENDER_MODEL_ID``, and the only
+    other caller (``pose_to_tshape``) passes a different fixed model of its
+    own rather than letting one bubble up from a request.
     """
     payload: dict[str, object] = {
         "image": base64.b64encode(image_bytes).decode("ascii"),
@@ -180,7 +183,7 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
     client = _get_client()
     try:
         response = client.invoke_model(
-            modelId=config.BEDROCK_RENDER_MODEL_ID,
+            modelId=model_id or config.BEDROCK_RENDER_MODEL_ID,
             body=json.dumps(payload),
         )
     except Exception as exc:  # noqa: BLE001 - botocore raises a wide family
@@ -206,6 +209,95 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
         "output_format": output_format,
         "seed": (body.get("seeds") or [None])[0],
     }
+
+
+#: Fixed prompt for the T-pose transform — never caller-supplied, since this
+#: endpoint always wants the same thing: a clean, riggable reference pose.
+#:
+#: "reference sheet" alone (an earlier version of this prompt) reliably made
+#: Stability reach for photorealistic fashion-catalog imagery — technically a
+#: valid T-pose, but nothing like the child's drawing that went in. Naming an
+#: illustration style explicitly, and ruling out photorealism in the negative
+#: prompt, keeps the drawn character (hair, face, expression) recognisable.
+_TPOSE_PROMPT = (
+    "simple cartoon character illustration matching the input sketch, "
+    "flat colors, bold clean black outlines, children's drawing style, "
+    "standing in a T-pose with both arms held straight out to the sides, "
+    "standing perfectly upright, facing directly forward, symmetrical, "
+    "centered in frame, plain flat white background, no shadows"
+)
+_TPOSE_NEGATIVE_PROMPT = (
+    "photograph, photorealistic, realistic human skin, real person, "
+    "stock photo, fashion model, side view, back view, three-quarter view, "
+    "sitting, crouching, cropped, multiple characters, patterned "
+    "background, shadow, text, watermark, extra limbs, extra arms, "
+    "extra hands, four arms, duplicate limbs, deformed hands, "
+    "malformed hands, mutated, disfigured, bad anatomy, low quality, blurry"
+)
+
+
+def pose_to_tshape(image_bytes: bytes) -> dict:
+    """Redraw a line drawing standing in a forward-facing T-pose.
+
+    Stage 1 of the T-pose pipeline (see ``tpose_transform``). Reuses
+    ``render_sketch`` against a separate, dedicated model id so it can be
+    tuned independently of the free-text render feature even though both
+    currently point at the same Stability service.
+    """
+    return render_sketch(
+        image_bytes, _TPOSE_PROMPT,
+        control_strength=0.5,
+        negative_prompt=_TPOSE_NEGATIVE_PROMPT,
+        model_id=config.BEDROCK_TPOSE_MODEL_ID,
+    )
+
+
+def remove_background(image_bytes: bytes) -> bytes:
+    """Strip the background from an image via Stability's Remove Background
+    service, returning a PNG with a true alpha channel.
+
+    Stage 2 of the T-pose pipeline (see ``tpose_transform``). A separate call
+    from ``pose_to_tshape`` because Control Sketch has no transparent-
+    background output of its own — it can only draw against a flat colour.
+    """
+    payload = {
+        "image": base64.b64encode(image_bytes).decode("ascii"),
+        "output_format": "png",
+    }
+
+    client = _get_client()
+    try:
+        response = client.invoke_model(
+            modelId=config.BEDROCK_BG_REMOVAL_MODEL_ID,
+            body=json.dumps(payload),
+        )
+    except Exception as exc:  # noqa: BLE001 - botocore raises a wide family
+        raise _translate(exc) from exc
+
+    body = json.loads(response["body"].read())
+
+    finish_reason = (body.get("finish_reasons") or [None])[0]
+    if finish_reason:
+        raise BedrockError(
+            "The background couldn't be removed from that image.",
+            status=422, detail=finish_reason)
+
+    images = body.get("images") or []
+    if not images:
+        raise BedrockError(
+            "The background couldn't be removed.", status=502,
+            detail=f"empty images, finish_reasons={body.get('finish_reasons')}")
+
+    return base64.b64decode(images[0])
+
+
+def tpose_transform(image_bytes: bytes) -> dict:
+    """Turn a line drawing into a forward-facing, T-pose, transparent-
+    background PNG: pose first, then strip the background it was drawn
+    against."""
+    posed = pose_to_tshape(image_bytes)
+    transparent = remove_background(posed["image_bytes"])
+    return {"image_bytes": transparent, "output_format": "png"}
 
 
 def _translate(exc: Exception) -> BedrockError:

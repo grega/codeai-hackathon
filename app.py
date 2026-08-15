@@ -42,6 +42,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 # Separate bucket from the LLM-endpoint limiter in auth.py: this one guards a
 # route with no bearer token, so it's keyed by client address alone.
 render_limiter = RateLimiter("RENDER_RATE_PER_MINUTE", "RENDER_RATE_PER_DAY")
+tpose_limiter = RateLimiter("TPOSE_RATE_PER_MINUTE", "TPOSE_RATE_PER_DAY")
 
 
 # --------------------------------------------------------------------------
@@ -172,6 +173,9 @@ def render_avatar(avatar_id: str):
             result = bedrock.render_sketch(image_bytes, prompt)
         except bedrock.BedrockError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
+        # The player's actual designed look, not just the raw sketch — later
+        # steps (the T-pose transform) prefer this over avatar.image_path.
+        store.set_rendered_image(avatar_id, result["image_bytes"])
         return {
             "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
             "output_format": result["output_format"],
@@ -179,6 +183,39 @@ def render_avatar(avatar_id: str):
         }
 
     job = runner.submit(work, message="Rendering your character...")
+    return jsonify(job.to_json()), 202
+
+
+@app.post("/api/avatars/<avatar_id>/tpose")
+def tpose_avatar(avatar_id: str):
+    """Turn the avatar into a forward-facing, T-pose, transparent-background
+    PNG, via bedrock.tpose_transform. Fixed shape, no request body — always
+    the same transform, so nothing to validate beyond the avatar existing.
+
+    Prefers the avatar's most recent /render output (what the player actually
+    designed) over the raw line drawing (plain black-on-white, no colour or
+    style), falling back to the sketch if nothing has been rendered yet."""
+    avatar = store.get_avatar(avatar_id)
+    if not avatar or not avatar.image_path:
+        return fail("That avatar doesn't exist.", 404)
+
+    refusal = tpose_limiter.check(request.remote_addr or "unknown")
+    if refusal:
+        return fail(refusal, 429)
+
+    image_bytes = avatar.rendered_image_bytes or Path(avatar.image_path).read_bytes()
+
+    def work(progress):
+        try:
+            result = bedrock.tpose_transform(image_bytes)
+        except bedrock.BedrockError as exc:
+            raise ProviderError(exc.message, detail=exc.detail) from exc
+        return {
+            "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
+            "output_format": result["output_format"],
+        }
+
+    job = runner.submit(work, message="Posing your character...")
     return jsonify(job.to_json()), 202
 
 

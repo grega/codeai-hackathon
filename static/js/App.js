@@ -40,6 +40,18 @@ export const App = {
             <span class="hint">{{ s.hint }}</span>
           </button>
         </nav>
+
+        <div class="tpose-status" v-if="state.avatar && state.tpose.status !== 'idle'">
+          <span v-if="state.tpose.status === 'running'" class="muted">Posing avatar…</span>
+          <a v-else-if="state.tpose.status === 'done'" class="button primary"
+             :href="state.tpose.dataUrl" download="posed-avatar.png">
+            Download posed avatar
+          </a>
+          <span v-else-if="state.tpose.status === 'error'" class="error"
+                :title="state.tpose.error">
+            Posed avatar failed
+          </span>
+        </div>
       </header>
 
       <main>

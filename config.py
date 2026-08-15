@@ -106,5 +106,33 @@ RENDER_RATE_PER_MINUTE = int(os.environ.get("RENDER_RATE_PER_MINUTE", "5"))
 RENDER_RATE_PER_DAY = int(os.environ.get("RENDER_RATE_PER_DAY", "50"))
 
 
+# --------------------------------------------------------------------------
+# T-pose feature (POST /api/avatars/<id>/tpose)
+# --------------------------------------------------------------------------
+# Also browser-facing and also fixed-shape (an avatar's saved drawing, no
+# caller input), but always two Bedrock calls: a pose transform, then a
+# background removal. Its own model ids so each stage can be retuned or
+# swapped without touching the free-text render feature above.
+
+#: Stage 1 — redraws the avatar in a forward-facing T-pose. Same Stability
+#: Control Sketch service as BEDROCK_RENDER_MODEL_ID, kept as a separate
+#: setting since the two features may want to diverge later.
+BEDROCK_TPOSE_MODEL_ID = os.environ.get(
+    "BEDROCK_TPOSE_MODEL_ID", "us.stability.stable-image-control-sketch-v1:0")
+
+#: Stage 2 — strips the background, returning a PNG with a real alpha
+#: channel. Stability's own Remove Background service, invoked the same way
+#: as BEDROCK_TPOSE_MODEL_ID. (Amazon Nova Canvas can also do this, but isn't
+#: available in every account/region — Stability's version is used here
+#: since it's already required for stage 1.)
+BEDROCK_BG_REMOVAL_MODEL_ID = os.environ.get(
+    "BEDROCK_BG_REMOVAL_MODEL_ID", "us.stability.stable-image-remove-background-v1:0")
+
+#: Tighter than RENDER_RATE_PER_* since each call here is two Bedrock
+#: invocations rather than one.
+TPOSE_RATE_PER_MINUTE = int(os.environ.get("TPOSE_RATE_PER_MINUTE", "3"))
+TPOSE_RATE_PER_DAY = int(os.environ.get("TPOSE_RATE_PER_DAY", "30"))
+
+
 def ensure_dirs() -> None:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
