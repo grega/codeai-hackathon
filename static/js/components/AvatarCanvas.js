@@ -12,6 +12,9 @@ export const AvatarCanvas = {
     ghostPose: { type: Object, default: null },// translucent comparison figure
     jointHeat: { type: Object, default: null },// bone -> 0..1 error, tints limbs
     label: { type: String, default: "" },
+    //: Play an animation baked into the GLB instead of a contract pose/clip.
+    //: Name or index; null hands the bones back to applyPose.
+    bakedAnimation: { type: [String, Number], default: null },
   },
   setup(props) {
     const canvas = ref(null);
@@ -24,6 +27,9 @@ export const AvatarCanvas = {
       else if (props.pose) viewport.applyPose(props.pose);
       if (props.ghostPose) viewport.setGhostPose(props.ghostPose);
       if (props.jointHeat) viewport.setJointHeat(props.jointHeat);
+      if (props.bakedAnimation !== null) {
+        viewport.playGlbAnimation(props.bakedAnimation);
+      }
     });
 
     onBeforeUnmount(() => viewport?.dispose());
@@ -37,6 +43,10 @@ export const AvatarCanvas = {
       if (pose && !props.clip) viewport?.applyPose(pose);
     });
     watch(() => props.ghostPose, (pose) => viewport?.setGhostPose(pose));
+    watch(() => props.bakedAnimation, (which) => {
+      if (which === null) viewport?.stopGlbAnimation();
+      else viewport?.playGlbAnimation(which);
+    });
     watch(() => props.jointHeat, (heat) => {
       if (heat) viewport.setJointHeat(heat);
       else viewport?.clearJointHeat();

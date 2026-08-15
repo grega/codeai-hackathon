@@ -3,19 +3,19 @@ import { canEnter, goTo, state, STEPS } from "./store.js";
 import { StepSketch } from "./components/StepSketch.js";
 import { StepPose } from "./components/StepPose.js";
 import { StepTrain } from "./components/StepTrain.js";
-import { StepPlayground } from "./components/StepPlayground.js";
+import { StepAnimate } from "./components/StepAnimate.js";
 import { StepRender } from "./components/StepRender.js";
 
 const COMPONENTS = {
   sketch: StepSketch,
   pose: StepPose,
   train: StepTrain,
-  play: StepPlayground,
+  animate: StepAnimate,
   render: StepRender,
 };
 
 export const App = {
-  components: { StepSketch, StepPose, StepTrain, StepPlayground, StepRender },
+  components: { StepSketch, StepPose, StepTrain, StepAnimate, StepRender },
   setup() {
     return {
       state, STEPS, goTo, canEnter,

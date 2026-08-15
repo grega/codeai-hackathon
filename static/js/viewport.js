@@ -228,6 +228,8 @@ export class Viewport {
     this.glbGroup = null;
     this.skinned = [];
     this._reverseBones = null;
+    this.bakedClips = [];
+    this.stopGlbAnimation();
 
     if (rig.format === "glb" && rig.glb_url) {
       await this.#loadGlb(rig);
@@ -315,9 +317,14 @@ export class Viewport {
     // A baked idle animation would fight applyPose for control of the bones.
     // We never create a mixer, so clips simply go unplayed — but say so, since
     // silently dropping an animation the rigger exported is confusing.
-    if (gltf.animations?.length) {
-      console.info(`[viewport] ignoring ${gltf.animations.length} baked ` +
-                   `animation(s); poses are driven by the trainer`);
+    // Baked animations stay off by default — a rig exported with an idle loop
+    // would fight applyPose for control of the bones. Kept rather than dropped
+    // so playGlbAnimation() can opt in, which is how the Animate step previews
+    // what the LLM produced.
+    this.bakedClips = gltf.animations || [];
+    if (this.bakedClips.length) {
+      console.info(`[viewport] ${this.bakedClips.length} baked animation(s) ` +
+                   `available; not playing unless asked`);
     }
 
     const alias = rig.bone_aliases?.mixamo || {};
@@ -698,8 +705,55 @@ export class Viewport {
     if (this.ghostGroup) this.ghostGroup.visible = visible;
   }
 
+  /**
+   * Play an animation baked into the loaded GLB, by name or index.
+   *
+   * Takes over from the pose/clip path for as long as it runs: the mixer and
+   * applyPose both write bone quaternions, so whichever ran last would win on
+   * any given frame and the result would judder.
+   */
+  playGlbAnimation(which = 0) {
+    if (!this.bakedClips?.length) return false;
+
+    let clip;
+    if (typeof which === "string") {
+      // Exact, then case-insensitive: an LLM-chosen clip name reaches us via
+      // JSON while three may have uniquified the copy inside the GLB.
+      clip = this.bakedClips.find((c) => c.name === which)
+        || this.bakedClips.find(
+             (c) => c.name.toLowerCase() === which.toLowerCase());
+      if (!clip) {
+        // Generated animations are appended, so the last one is the best
+        // guess — far better than silently falling back to index 0, which on
+        // a Meshy rig is its baked idle and looks like nothing happened.
+        clip = this.bakedClips[this.bakedClips.length - 1];
+        console.warn(`[viewport] no baked animation named ${which}; playing `
+                     + `${clip.name} instead. Available: `
+                     + this.bakedClips.map((c) => c.name).join(", "));
+      }
+    } else {
+      clip = this.bakedClips[which];
+    }
+    if (!clip) return false;
+
+    this.clip = null;
+    this.playing = false;
+    this.mixer = new THREE.AnimationMixer(this.glbGroup);
+    this.mixer.clipAction(clip).reset().play();
+    this.clock.start();
+    return true;
+  }
+
+  /** Stop a baked animation and hand the bones back to applyPose. */
+  stopGlbAnimation() {
+    if (!this.mixer) return;
+    this.mixer.stopAllAction();
+    this.mixer = null;
+  }
+
   /** Play a clip on a loop. Pass null to stop. */
   playClip(clip) {
+    this.stopGlbAnimation();
     this.clip = clip;
     this.playing = Boolean(clip);
     this.clock.start();
@@ -800,6 +854,23 @@ export class Viewport {
 
     const now = performance.now();
     const delta = this.clock.getDelta();
+    if (this.mixer) {
+      // A baked glTF animation is driving the bones. It has to come first and
+      // exclude the pose paths below: the mixer and applyPose both write bone
+      // quaternions, so whichever ran last would win and the result would
+      // judder. Honours pause so the Render step can hold a frame.
+      if (!this.paused) this.mixer.update(delta);
+      if (this.renderMode) {
+        this.#updateRenderCamera(
+          this.captureStartedAt !== null
+            ? Math.max(0, (now - this.captureStartedAt) / 1000)
+            : now / 1000,
+          this.captureStartedAt !== null);
+      }
+      this.controls?.update();
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
     if (this.captureStartedAt !== null) {
       this.elapsed = Math.max(0, (now - this.captureStartedAt) / 1000);
       if (this.clip) this.applyPose(samplePose(this.clip, this.elapsed));

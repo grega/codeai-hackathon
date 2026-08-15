@@ -147,6 +147,11 @@ BEDROCK_BG_REMOVAL_MODEL_ID = os.environ.get(
 
 #: Tighter than RENDER_RATE_PER_* since each call here is two Bedrock
 #: invocations rather than one.
+#: The Animate step calls an LLM through OpenRouter, one call per press, and
+#: each call is slow as well as billable — so this is the tightest cap of the lot.
+ANIMATE_RATE_PER_MINUTE = int(os.environ.get("ANIMATE_RATE_PER_MINUTE", "3"))
+ANIMATE_RATE_PER_DAY = int(os.environ.get("ANIMATE_RATE_PER_DAY", "40"))
+
 TPOSE_RATE_PER_MINUTE = int(os.environ.get("TPOSE_RATE_PER_MINUTE", "3"))
 TPOSE_RATE_PER_DAY = int(os.environ.get("TPOSE_RATE_PER_DAY", "30"))
 

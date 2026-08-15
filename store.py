@@ -53,6 +53,10 @@ class Behaviour:
     avatar_id: str
     trained: bool = False
     best_reward: float = 0.0
+    #: The run this pose was learned in, when it was learned rather than
+    #: imagined. The Animate step needs it to fetch the posed GLB the LLM
+    #: animates towards; an imagined behaviour has no run and can't be animated.
+    run_id: str | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -61,6 +65,7 @@ class Behaviour:
             "avatar_id": self.avatar_id,
             "trained": self.trained,
             "best_reward": self.best_reward,
+            "run_id": self.run_id,
             "clip": self.clip.to_json(),
         }
 
@@ -113,10 +118,11 @@ class Store:
 
     # -- behaviours ------------------------------------------------------
     def add_behaviour(self, name: str, clip: Clip, avatar_id: str,
-                      trained: bool = False, best_reward: float = 0.0) -> Behaviour:
+                      trained: bool = False, best_reward: float = 0.0,
+                      run_id: str | None = None) -> Behaviour:
         behaviour = Behaviour(id=new_id("bhv"), name=name, clip=clip,
                               avatar_id=avatar_id, trained=trained,
-                              best_reward=best_reward)
+                              best_reward=best_reward, run_id=run_id)
         with self._lock:
             self.behaviours[behaviour.id] = behaviour
         return behaviour

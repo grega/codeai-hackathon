@@ -69,6 +69,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 # route with no bearer token, so it's keyed by client address alone.
 render_limiter = RateLimiter("RENDER_RATE_PER_MINUTE", "RENDER_RATE_PER_DAY")
 tpose_limiter = RateLimiter("TPOSE_RATE_PER_MINUTE", "TPOSE_RATE_PER_DAY")
+# The LLM animation step spends OpenRouter credit, one call per press.
+animate_limiter = RateLimiter("ANIMATE_RATE_PER_MINUTE", "ANIMATE_RATE_PER_DAY")
 
 
 # --------------------------------------------------------------------------
@@ -424,6 +426,113 @@ def export_run_json(run_id: str):
     return jsonify(document)
 
 
+# --------------------------------------------------------------------------
+# Phase 5 — animate
+#
+# Hand the LLM the two ends of the movement and let it invent the in-between:
+# the avatar's own rig at bind (the T-pose the training started from) and the
+# posed export (what it learned). Composed here rather than in the browser so
+# the two multi-megabyte GLBs never leave the server — the alternative is the
+# client downloading ~7MB and immediately uploading it again.
+# --------------------------------------------------------------------------
+
+@app.post("/api/training/runs/<run_id>/animate")
+def animate_run(run_id: str):
+    try:
+        run, avatar, clip = _export_inputs(run_id)
+        posed_glb, _ = export.build_glb(run, avatar, clip)
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[animate] {run_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+
+    body = request.json or {}
+    prompt = (body.get("prompt") or clip.prompt or clip.name).strip()
+    if len(prompt) > config.BEDROCK_MAX_PROMPT_CHARS:
+        return fail("That description is too long.", 413)
+
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        return fail("The animation service isn't set up on this server.", 503)
+
+    refusal = animate_limiter.check(request.remote_addr or "unknown")
+    if refusal:
+        return fail(refusal, 429)
+
+    rig_glb = avatar.rig.glb_bytes
+    loop = bool(body.get("loop", True))
+
+    def work(progress):
+        progress(0.15, "Looking at where it starts and ends...")
+        with tempfile.TemporaryDirectory() as tmp_name:
+            tmp = Path(tmp_name)
+            start_path, end_path = tmp / "start.glb", tmp / "end.glb"
+            start_path.write_bytes(rig_glb)
+            end_path.write_bytes(posed_glb)
+
+            gltf_doc, joints_a = llm_animator_gltf_utils.load_skeleton(str(start_path))
+            _, joints_b = llm_animator_gltf_utils.load_skeleton(str(end_path))
+
+            progress(0.4, "Asking how to move between them...")
+            llm_animator_client.DEFAULT_MODEL = _LLM_ANIMATOR_OPENROUTER_MODEL
+            llm_animator_client.DEFAULT_BASE_URL = _LLM_ANIMATOR_OPENROUTER_BASE_URL
+            try:
+                name, tracks = llm_animator_core.generate_transition(
+                    joints_a, joints_b, style_prompt=prompt,
+                    use_llm=True, loop=loop)
+            except ValueError as exc:
+                # Raised when start and end are the same pose — a real outcome
+                # for a run that barely moved, not a server fault.
+                raise ProviderError(
+                    "That pose is too close to the starting pose to animate. "
+                    "Train it a bit longer and try again.",
+                    detail=str(exc)) from exc
+
+            progress(0.85, "Building the animation...")
+            # A Meshy rig usually ships its own baked idle ("spin"), and
+            # add_rotation_animation APPENDS — so without this the output holds
+            # two clips and anything defaulting to index 0 plays the idle
+            # instead of what we just generated. Drop the originals so the
+            # artifact means exactly one thing: the movement the LLM invented.
+            existing = len(gltf_doc.animations or [])
+            llm_animator_gltf_utils.add_rotation_animation(gltf_doc, tracks, name=name)
+            if existing:
+                gltf_doc.animations = gltf_doc.animations[existing:]
+                log(f"[animate] {run_id}: dropped {existing} pre-existing "
+                    f"animation(s) from the rig, kept {name!r}")
+
+            out = tmp / "animated.glb"
+            llm_animator_gltf_utils.save(gltf_doc, str(out))
+            run.animation_glb = out.read_bytes()
+            run.animation_name = name
+
+        return {
+            "run_id": run_id,
+            "animation_name": name,
+            "glb_url": f"/api/training/runs/{run_id}/animation.glb",
+            "bytes": len(run.animation_glb),
+        }
+
+    job = runner.submit(work, message="Working out how to move...")
+    return jsonify(job.to_json()), 202
+
+
+@app.get("/api/training/runs/<run_id>/animation.glb")
+def get_run_animation(run_id: str):
+    run = store.get_run(run_id)
+    data = getattr(run, "animation_glb", None) if run else None
+    if not data:
+        return fail("That run hasn't been animated yet.", 404)
+
+    etag = hashlib.sha256(data).hexdigest()[:32]
+    if request.if_none_match.contains(etag):
+        return Response(status=304, headers={"ETag": f'"{etag}"',
+                                             "Cache-Control": "no-cache"})
+    return Response(data, mimetype="model/gltf-binary", headers={
+        "ETag": f'"{etag}"', "Cache-Control": "no-cache",
+        "X-Animation-Name": getattr(run, "animation_name", "") or "",
+    })
+
+
 @app.get("/api/training/runs/<run_id>/events")
 def stream_run(run_id: str):
     run = store.get_run(run_id)
@@ -504,7 +613,8 @@ def create_behaviour():
     behaviour = store.add_behaviour(
         name=name, clip=clip, avatar_id=avatar.id,
         trained=bool(body.get("trained")),
-        best_reward=float(body.get("best_reward", 0.0)))
+        best_reward=float(body.get("best_reward", 0.0)),
+        run_id=(body.get("run_id") or None))
     return jsonify(behaviour.to_json()), 201
 
 

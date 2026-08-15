@@ -441,6 +441,14 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
   .render-result { padding: .8rem; }
 }
 
+/* A deliberately understated action — present, but not competing with the
+   primary buttons beside it. */
+.link-quiet {
+  font-size: .8rem; color: var(--muted); text-decoration: underline;
+  align-self: center; margin-left: .2rem;
+}
+.link-quiet:hover { color: var(--brand-dark); }
+
 /* -- feedback ----------------------------------------------------------- */
 .progress { margin-top: .9rem; font-size: .85rem; color: var(--muted); font-weight: 600; }
 .progress-bar {

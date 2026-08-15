@@ -127,6 +127,18 @@ export const api = {
     return () => source.close();
   },
 
+  // -- phase 5: animate ------------------------------------------------
+  /**
+   * Ask the LLM to invent the movement between the T-pose and what the avatar
+   * learned. Slow (a model call), so it goes through the job pattern like
+   * rigging and posing.
+   */
+  async animateRun(runId, prompt, onProgress, { loop = true } = {}) {
+    const job = await request(`/api/training/runs/${runId}/animate`,
+                              json({ prompt, loop }));
+    return waitForJob(job, onProgress, { interval: 1000 });
+  },
+
   // -- behaviours -----------------------------------------------------
   listBehaviours: (avatarId) =>
     request(`/api/behaviours?avatar_id=${encodeURIComponent(avatarId)}`),

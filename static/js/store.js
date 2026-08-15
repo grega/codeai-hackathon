@@ -8,7 +8,7 @@ export const STEPS = [
   { id: "sketch", label: "Draw", hint: "Draw a character" },
   { id: "pose", label: "Teach", hint: "Describe a move" },
   { id: "train", label: "Train", hint: "Reward what you want" },
-  { id: "play", label: "Play", hint: "Try it out" },
+  { id: "animate", label: "Animate", hint: "Make it move" },
   { id: "render", label: "Render", hint: "Make a video" },
 ];
 
@@ -50,7 +50,7 @@ export function canEnter(step) {
   if (step === "sketch") return true;
   if (step === "pose") return Boolean(state.avatar);
   if (step === "train") return Boolean(state.avatar && state.clips.length);
-  if (step === "play") return Boolean(state.avatar);
+  if (step === "animate") return Boolean(state.avatar);
   if (step === "render") {
     return Boolean(state.avatar && state.behaviours.length);
   }

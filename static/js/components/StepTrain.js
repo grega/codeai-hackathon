@@ -119,6 +119,8 @@ export const StepTrain = {
         name: `${state.activeClip.name} (learned)`,
         trained: true,
         best_reward: latest.value.best_reward,
+        // Lets the Animate step fetch the posed GLB this run produced.
+        run_id: run.value.id,
         clip: {
           name: `${state.activeClip.name} (learned)`,
           fps: 24,

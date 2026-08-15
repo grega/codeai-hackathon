@@ -128,8 +128,8 @@ class MockTrainer(Trainer):
                     current, goal, cfg.reward_weights, previous=previous)
                 if current_reward > best_reward:
                     best_reward = current_reward
-                    if episode > 1:
-                        note = "New best!"
+                    # if episode > 1:
+                        # note = "New best!"
 
             previous = current
             yield Episode(

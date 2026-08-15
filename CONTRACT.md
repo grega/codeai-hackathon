@@ -216,7 +216,31 @@ A real Meshy export is ~3.6MB — roughly 5M characters base64'd, essentially al
 mesh, textures and skin weights that no model can act on. `export.json` is ~3KB
 and carries every fact the animation step needs. A test pins it under 20KB.
 
-### Next step: animation (not built)
+### Animation (built — the Animate step)
+
+`POST /api/training/runs/<id>/animate` takes a style prompt and returns a job;
+the finished GLB is served from `.../animation.glb` with the movement baked in
+as a glTF `animation`.
+
+Composed server-side on purpose. The two inputs are the avatar's rig at bind
+(the T-pose training started from) and `export.build_glb`'s posed output — both
+multi-megabyte, so sending them via the browser would mean downloading ~7MB and
+immediately uploading it again.
+
+The browser previews it rather than downloading: `viewport.playGlbAnimation()`
+drives an `AnimationMixer`, and while it runs it **excludes** the pose/clip
+path. Both write bone quaternions, so if they ran together whichever went last
+would win the frame and the result would judder.
+
+Only a **trained** behaviour can be animated — it needs a run behind it to
+supply the "before". Behaviours therefore carry `run_id`; an imagined move has
+none and the step says so rather than offering a button that fails.
+
+Rate-limited by `ANIMATE_RATE_PER_MINUTE` / `_PER_DAY` (3/40) since each press
+is a billable OpenRouter call, and it needs `OPENROUTER_API_KEY` or the route
+returns 503.
+
+### Earlier notes on this step (kept — still true)
 
 Turning start → end into in-between keyframes is the same shape as an existing
 interface:
@@ -315,6 +339,8 @@ PROVIDER_POSING=real flask --app app run
 | POST | `/api/training/runs/<id>/{stop,pause,resume,speed}` | control |
 | GET | `/api/training/runs/<id>/export.glb` | posed GLB + embedded metadata |
 | GET | `/api/training/runs/<id>/export.json` | poses + provenance, for the animation step |
+| POST | `/api/training/runs/<id>/animate` | LLM invents the movement between the two poses -> job |
+| GET | `/api/training/runs/<id>/animation.glb` | the animated GLB (baked glTF animation) |
 | GET/POST | `/api/behaviours` | named behaviours |
 
 - Rigging and pose generation return a job immediately; poll `/api/jobs/<id>`.
