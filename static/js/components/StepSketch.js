@@ -237,12 +237,6 @@ export const StepSketch = {
 
           <AvatarCanvas v-if="state.avatar" :rig="state.avatar.rig"
                         label="Your avatar" />
-          <div v-else class="placeholder">
-            <p>Your avatar will appear here once you've drawn something.</p>
-            <p class="muted">Behind the scenes: your drawing goes to a model
-               that works out where the head, arms and legs are, then fits a
-               skeleton to them. That skeleton is what you'll train.</p>
-          </div>
         </div>
       </div>
     </section>
