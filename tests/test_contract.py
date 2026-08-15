@@ -12,8 +12,10 @@ message names the rule you broke.
 
 from __future__ import annotations
 
+import io
 import math
 import threading
+import time
 
 import pytest
 
@@ -278,3 +280,108 @@ class TestRewards:
 def breakdown_keys():
     from schemas import DEFAULT_REWARD_WEIGHTS
     return DEFAULT_REWARD_WEIGHTS.keys()
+
+
+class TestGlbRig:
+    """The GLB path: bone aliases and the canned-GLB switch.
+
+    The retarget maths itself lives in the browser and is verified there; these
+    guard the server side of the contract that the browser depends on.
+    """
+
+    def test_every_contract_bone_has_a_mixamo_alias(self):
+        from schemas import MIXAMO_BONE_MAP
+        assert set(MIXAMO_BONE_MAP) == BONE_SET
+
+    def test_aliases_are_unique(self):
+        """Two contract bones pointing at one GLB node means one silently wins."""
+        from schemas import MIXAMO_BONE_MAP
+        targets = list(MIXAMO_BONE_MAP.values())
+        assert len(set(targets)) == len(targets)
+
+    def test_shoulder_maps_to_the_upper_arm_not_the_clavicle(self):
+        """Mixamo's LeftShoulder is the clavicle — mapping to it mangles arms."""
+        from schemas import MIXAMO_BONE_MAP
+        assert "Shoulder" not in MIXAMO_BONE_MAP["L_shoulder"]
+        assert "Shoulder" not in MIXAMO_BONE_MAP["R_shoulder"]
+        assert MIXAMO_BONE_MAP["L_shoulder"].endswith("Arm")
+
+    def test_sides_are_mirrored_against_mixamo(self):
+        """Our L_ is screen-left (-x); Mixamo's Left is anatomical (+x).
+
+        Un-mirror this and the rig still loads, still renders, and then drives
+        every arm raise downwards — a -90 degrees z rotation lifts a limb lying
+        along -x and lowers one lying along +x. Verified in the browser against
+        both tests/fixtures/mixamo-style.glb and a real Meshy export.
+        """
+        from schemas import MIXAMO_BONE_MAP
+        for ours, theirs in MIXAMO_BONE_MAP.items():
+            if ours.startswith("L_"):
+                assert "Right" in theirs, f"{ours} -> {theirs} is not mirrored"
+            elif ours.startswith("R_"):
+                assert "Left" in theirs, f"{ours} -> {theirs} is not mirrored"
+
+    def test_left_bones_really_are_on_the_negative_x_side(self):
+        """The premise the mirror rests on — guard it in case BONE_TREE moves."""
+        from schemas import BONE_TREE
+        assert BONE_TREE["L_shoulder"][1][0] < 0
+        assert BONE_TREE["R_shoulder"][1][0] > 0
+
+    def test_rig_json_carries_the_alias_map(self):
+        """The viewport only ever sees the rig object, not /api/schema."""
+        from schemas import MIXAMO_BONE_MAP, Rig
+        # Assert it ships and matches the source of truth — not a hard-coded
+        # side, which is what the mirror rule owns.
+        assert Rig().to_json()["bone_aliases"]["mixamo"] == MIXAMO_BONE_MAP
+
+    def test_mock_rigger_serves_a_glb_when_configured(self, monkeypatch):
+        import config
+        fixture = "tests/fixtures/mixamo-style.glb"
+        monkeypatch.setattr(config, "MOCK_RIG_GLB", fixture)
+        rig = validate_rig(providers.get_rigger().rig(PIXEL_PNG, "image/png",
+                                                      noop_progress))
+        assert rig.format == "glb"
+        assert rig.glb_bytes[:4] == b"glTF"
+
+    def test_unreadable_glb_fails_with_a_child_safe_message(self, monkeypatch):
+        import config
+        from schemas import ProviderError
+        monkeypatch.setattr(config, "MOCK_RIG_GLB", "does/not/exist.glb")
+        with pytest.raises(ProviderError) as exc:
+            providers.get_rigger().rig(PIXEL_PNG, "image/png", noop_progress)
+        assert "couldn't load" in exc.value.user_message
+
+    def test_glb_revalidates_rather_than_being_heuristically_cached(
+            self, monkeypatch):
+        """A 3MB binary with no validators gets cached by the browser and never
+        re-fetched, so a swapped rig keeps rendering the old body."""
+        import app as app_module
+        import config
+        monkeypatch.setattr(config, "MOCK_RIG_GLB",
+                            "tests/fixtures/mixamo-style.glb")
+        app_module.app.config["TESTING"] = True
+        client = app_module.app.test_client()
+
+        job = client.post("/api/avatars", data={
+            "image": (io.BytesIO(PIXEL_PNG), "s.png")}).get_json()
+        for _ in range(40):
+            job = client.get(f"/api/jobs/{job['id']}").get_json()
+            if job["status"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        assert job["status"] == "done", job
+
+        url = f"/api/avatars/{job['result']['id']}/glb"
+        first = client.get(url)
+        assert first.status_code == 200
+        assert first.headers["Cache-Control"] == "no-cache"
+        etag = first.headers["ETag"]
+        assert etag
+
+        again = client.get(url, headers={"If-None-Match": etag})
+        assert again.status_code == 304
+        assert not again.data
+
+        changed = client.get(url, headers={"If-None-Match": '"stale"'})
+        assert changed.status_code == 200
+        assert changed.data[:4] == b"glTF"

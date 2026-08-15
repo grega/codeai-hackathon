@@ -58,6 +58,61 @@ ARTICULATED_BONES: list[str] = [
     "R_hip", "R_knee",
 ]
 
+#: Contract bone -> the equivalent bone in a Mixamo-convention skeleton, which
+#: is what Meshy's auto-rigger emits. Used by the browser to find the right
+#: node in a GLB; see the retarget notes in static/js/viewport.js.
+#:
+#: Two traps here, both of which produce a rig that loads perfectly and then
+#: moves wrongly.
+#:
+#: 1. Mixamo's "LeftShoulder" is the CLAVICLE. The upper arm — the bone our
+#:    L_shoulder means — is "LeftArm".
+#:
+#: 2. THE SIDES ARE MIRRORED, deliberately. Our L_* bones sit at NEGATIVE x
+#:    (see BONE_TREE), which is screen-left for a viewer looking down -z.
+#:    Mixamo's "Left" is the character's ANATOMICAL left, which is +x for a
+#:    character facing +z — screen-RIGHT. So our `L_` maps to their `Right`.
+#:
+#:    Get this backwards and nothing looks broken at load: bones resolve, the
+#:    mesh renders, and then every arm raise drives the arm downwards, because
+#:    a -90 degrees z rotation lifts a limb lying along -x and lowers one lying
+#:    along +x.
+#:
+#:    We keep screen-relative sides because that is what our poses and rotation
+#:    conventions are written against, and because a child watching an avatar
+#:    reads "the left one" as the one on the left of the screen. The cost is
+#:    that a pose meaning the character's anatomical left plays on its right —
+#:    invisible for symmetric moves like waving, wrong for "raise your right
+#:    hand". Flip this map if you ever need anatomical sides.
+#:
+#: A Mixamo rig has ~65 bones to our 16. Everything unmapped (fingers, toes,
+#: Spine1/Spine2) simply stays at its bind pose, which is fine — though it does
+#: mean torso bends read as stiffer, since our single `spine` drives only the
+#: first of three spine joints.
+MIXAMO_BONE_MAP: dict[str, str] = {
+    "hips":       "mixamorig:Hips",
+    "spine":      "mixamorig:Spine",
+    "neck":       "mixamorig:Neck",
+    "head":       "mixamorig:Head",
+
+    # our L_ (screen-left, -x) -> their Right (anatomical right, -x)
+    "L_shoulder": "mixamorig:RightArm",      # NOT RightShoulder (the clavicle)
+    "L_elbow":    "mixamorig:RightForeArm",
+    "L_hand":     "mixamorig:RightHand",
+
+    "R_shoulder": "mixamorig:LeftArm",
+    "R_elbow":    "mixamorig:LeftForeArm",
+    "R_hand":     "mixamorig:LeftHand",
+
+    "L_hip":      "mixamorig:RightUpLeg",
+    "L_knee":     "mixamorig:RightLeg",
+    "L_foot":     "mixamorig:RightFoot",
+
+    "R_hip":      "mixamorig:LeftUpLeg",
+    "R_knee":     "mixamorig:LeftLeg",
+    "R_foot":     "mixamorig:LeftFoot",
+}
+
 IDENTITY_QUAT: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 1.0)
 
 #: The rest pose: every bone at identity rotation. A Pose is always expressed
@@ -98,8 +153,15 @@ class Rig:
     ``format`` decides how the browser renders it:
       - "procedural": the viewport builds geometry from the bone tree itself,
         so it stands up with only this bone list. This is what the mocks return.
-      - "glb": the viewport loads ``glb_bytes`` via GLTFLoader. Bone names in
-        the GLB must match BONES exactly.
+      - "glb": the viewport loads ``glb_bytes`` via GLTFLoader. Bone nodes are
+        resolved by contract name first, then through MIXAMO_BONE_MAP — so a
+        Meshy/Mixamo-convention rig works without renaming anything.
+
+    A "glb" rig must bind in a T-POSE: arms out along ±X, legs down. Individual
+    bone local axes can be whatever the exporter produced — the browser reads
+    each bone's bind rotation and retargets into it — but the overall bind
+    posture has to match, because a pose is defined as a rotation away from it.
+    An A-pose rig will come out with the arms wrong by the A/T difference.
 
     Both paths hit the same viewport code, so switching a real rigger on
     requires no frontend change.
@@ -117,6 +179,9 @@ class Rig:
             "skeleton": self.skeleton,
             "bone_tree": {k: {"parent": v[0], "offset": list(v[1])}
                           for k, v in BONE_TREE.items()},
+            # The viewport needs these to find bones in a GLB, and it only ever
+            # sees the rig object — so they ride here as well as on /api/schema.
+            "bone_aliases": {"mixamo": MIXAMO_BONE_MAP},
             "glb_url": glb_url,
             "notes": self.notes,
         }
@@ -371,6 +436,7 @@ def schema_json() -> dict[str, Any]:
         "articulated_bones": ARTICULATED_BONES,
         "bone_tree": {k: {"parent": v[0], "offset": list(v[1])}
                       for k, v in BONE_TREE.items()},
+        "bone_aliases": {"mixamo": MIXAMO_BONE_MAP},
         "rest_pose": REST_POSE,
         "reward_weights": DEFAULT_REWARD_WEIGHTS,
         "limits": {
