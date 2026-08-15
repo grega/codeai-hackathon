@@ -344,7 +344,9 @@ export class Viewport {
       name ? (byName.get(name) || byName.get(normaliseBoneName(name))) : undefined;
 
     for (const bone of rig.skeleton) {
-      const node = find(bone) || find(alias[bone]);
+      const mixamoName = alias[bone];
+      const bareMixamoName = mixamoName?.replace(/^mixamorig[:_]?/i, "");
+      const node = find(bone) || find(mixamoName) || find(bareMixamoName);
       if (node) this.bones[bone] = node;
     }
 

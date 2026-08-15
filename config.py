@@ -49,9 +49,8 @@ RIGGING_POLL_INTERVAL = float(
 #: multiplies this by its speed control.
 EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
 
-#: Max upload size. Sized for a sketch PNG originally; also covers the
-#: llm-animator endpoint's GLB uploads (input + pose_b can be ~3.5MB each).
-MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 20 * 1024 * 1024))
+#: Max upload size for a sketch.
+MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))
 
 #: Path to a rigged GLB the mock rigger should serve instead of the procedural
 #: figure. Lets the whole GLB path be exercised before a real rigger exists:
