@@ -59,14 +59,6 @@ export const App = {
         <component v-else-if="state.ready" :is="current" />
         <p v-else class="muted">Starting up…</p>
       </main>
-
-      <footer class="statusbar">
-        <span v-for="[name, flavour] in providerList" :key="name"
-              class="provider" :class="flavour">
-          {{ name }}: <strong>{{ flavour }}</strong>
-        </span>
-        <span class="muted">mock = a stand-in, not the real model</span>
-      </footer>
     </div>
   `,
 };

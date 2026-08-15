@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "run_id": "run_fixture",
+  "avatar_id": "av_fixture",
+  "skeleton": {
+    "bones": [
+      "hips",
+      "spine",
+      "neck",
+      "head",
+      "L_shoulder",
+      "L_elbow",
+      "L_hand",
+      "R_shoulder",
+      "R_elbow",
+      "R_hand",
+      "L_hip",
+      "L_knee",
+      "L_foot",
+      "R_hip",
+      "R_knee",
+      "R_foot"
+    ],
+    "articulated": [
+      "spine",
+      "neck",
+      "head",
+      "L_shoulder",
+      "L_elbow",
+      "R_shoulder",
+      "R_elbow",
+      "L_hip",
+      "L_knee",
+      "R_hip",
+      "R_knee"
+    ],
+    "hierarchy": {
+      "hips": null,
+      "spine": "hips",
+      "neck": "spine",
+      "head": "neck",
+      "L_shoulder": "spine",
+      "L_elbow": "L_shoulder",
+      "L_hand": "L_elbow",
+      "R_shoulder": "spine",
+      "R_elbow": "R_shoulder",
+      "R_hand": "R_elbow",
+      "L_hip": "hips",
+      "L_knee": "L_hip",
+      "L_foot": "L_knee",
+      "R_hip": "hips",
+      "R_knee": "R_hip",
+      "R_foot": "R_knee"
+    },
+    "rest_offsets": {
+      "hips": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "spine": [
+        0.0,
+        0.25,
+        0.0
+      ],
+      "neck": [
+        0.0,
+        0.25,
+        0.0
+      ],
+      "head": [
+        0.0,
+        0.15,
+        0.0
+      ],
+      "L_shoulder": [
+        -0.18,
+        0.2,
+        0.0
+      ],
+      "L_elbow": [
+        -0.25,
+        0.0,
+        0.0
+      ],
+      "L_hand": [
+        -0.22,
+        0.0,
+        0.0
+      ],
+      "R_shoulder": [
+        0.18,
+        0.2,
+        0.0
+      ],
+      "R_elbow": [
+        0.25,
+        0.0,
+        0.0
+      ],
+      "R_hand": [
+        0.22,
+        0.0,
+        0.0
+      ],
+      "L_hip": [
+        -0.1,
+        -0.05,
+        0.0
+      ],
+      "L_knee": [
+        0.0,
+        -0.35,
+        0.0
+      ],
+      "L_foot": [
+        0.0,
+        -0.35,
+        0.0
+      ],
+      "R_hip": [
+        0.1,
+        -0.05,
+        0.0
+      ],
+      "R_knee": [
+        0.0,
+        -0.35,
+        0.0
+      ],
+      "R_foot": [
+        0.0,
+        -0.35,
+        0.0
+      ]
+    },
+    "pose_format": "bone name -> local rotation relative to rest, quaternion [x, y, z, w]"
+  },
+  "poses": {
+    "start": {
+      "hips": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "spine": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "neck": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "head": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_shoulder": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_elbow": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_hand": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_shoulder": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_elbow": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_hand": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_hip": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_knee": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_foot": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_hip": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_knee": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_foot": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    "end": {
+      "hips": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "spine": [
+        -0.019174081437151696,
+        0.028008640910776157,
+        0.04375746136078947,
+        0.9984654001068999
+      ],
+      "neck": [
+        0.03599266167110812,
+        0.02252824652853513,
+        -0.012948124874413023,
+        0.9990141903278529
+      ],
+      "head": [
+        7.834859229687604e-05,
+        0.0033739758042751746,
+        -0.042894486246253694,
+        0.9990739077758163
+      ],
+      "L_shoulder": [
+        -0.03453447473967201,
+        0.07151214937431342,
+        -0.47278203213365905,
+        0.8775936033483202
+      ],
+      "L_elbow": [
+        -0.026566927241174362,
+        -0.04814350040244102,
+        -0.20075073503340557,
+        0.9780979215444177
+      ],
+      "L_hand": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_shoulder": [
+        -0.12291845539588145,
+        0.1398297369548119,
+        0.7329185140435842,
+        0.6543463530565318
+      ],
+      "R_elbow": [
+        0.020018888986050757,
+        0.009332837550237501,
+        0.20107992185430093,
+        0.9793257921928195
+      ],
+      "R_hand": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "L_hip": [
+        -0.0007452919899283185,
+        -0.019602513655238078,
+        0.014536263772627825,
+        0.9997018970842151
+      ],
+      "L_knee": [
+        0.05705038777693479,
+        -0.0029550024304754053,
+        0.05302714955556376,
+        0.996957693498149
+      ],
+      "L_foot": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_hip": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ],
+      "R_knee": [
+        0.029060912699774365,
+        0.014236248363598405,
+        -0.009092581389151094,
+        0.9994348991051232
+      ],
+      "R_foot": [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    }
+  },
+  "start_pose_note": "T-pose: every bone at identity. This is both our rest pose and the GLB's bind pose, so the two skeletons agree at the start of any animation.",
+  "target": {
+    "name": "Arms in the air",
+    "prompt": "waves arms in the air"
+  },
+  "training": {
+    "episodes": 300,
+    "episodes_run": 300,
+    "best_reward": 0.9218,
+    "match": 0.7543,
+    "reward_weights": {
+      "pose_match": 1.0,
+      "arm_height": 0.0,
+      "symmetry": 0.0,
+      "stillness": 0.0
+    }
+  },
+  "node_map": {
+    "L_elbow": "mixamorig_RightForeArm_036",
+    "L_foot": "mixamorig_RightFoot_059",
+    "L_hand": "mixamorig_RightHand_037",
+    "L_hip": "mixamorig_RightUpLeg_058",
+    "L_knee": "mixamorig_RightLeg_00",
+    "L_shoulder": "mixamorig_RightArm_035",
+    "R_elbow": "mixamorig_LeftForeArm_012",
+    "R_foot": "mixamorig_LeftFoot_064",
+    "R_hand": "mixamorig_LeftHand_013",
+    "R_hip": "mixamorig_LeftUpLeg_062",
+    "R_knee": "mixamorig_LeftLeg_063",
+    "R_shoulder": "mixamorig_LeftArm_011",
+    "head": "mixamorig_Head_06",
+    "hips": "mixamorig_Hips_01",
+    "neck": "mixamorig_Neck_05",
+    "spine": "mixamorig_Spine_02"
+  },
+  "unmapped_bones": [],
+  "bone_aliases": {
+    "mixamo": {
+      "hips": "mixamorig:Hips",
+      "spine": "mixamorig:Spine",
+      "neck": "mixamorig:Neck",
+      "head": "mixamorig:Head",
+      "L_shoulder": "mixamorig:RightArm",
+      "L_elbow": "mixamorig:RightForeArm",
+      "L_hand": "mixamorig:RightHand",
+      "R_shoulder": "mixamorig:LeftArm",
+      "R_elbow": "mixamorig:LeftForeArm",
+      "R_hand": "mixamorig:LeftHand",
+      "L_hip": "mixamorig:RightUpLeg",
+      "L_knee": "mixamorig:RightLeg",
+      "L_foot": "mixamorig:RightFoot",
+      "R_hip": "mixamorig:LeftUpLeg",
+      "R_knee": "mixamorig:LeftLeg",
+      "R_foot": "mixamorig:LeftFoot"
+    }
+  },
+  "posed": "end"
+}

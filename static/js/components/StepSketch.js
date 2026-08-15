@@ -56,6 +56,7 @@ export const StepSketch = {
       ctx.putImageData(entry.imageData, 0, 0);
       hasDrawing.value = entry.hadDrawing;
       uploadCleaned.value = false;
+      clearRenderedImage();
     }
 
     function positionOf(event) {
@@ -67,7 +68,9 @@ export const StepSketch = {
     }
 
     function start(event) {
+      if (busy.value || renderBusy.value) return;
       pushUndoSnapshot();
+      clearRenderedImage();
       drawing = true;
       hasDrawing.value = true;
       uploadCleaned.value = false;
@@ -93,6 +96,7 @@ export const StepSketch = {
       ctx.fillRect(0, 0, canvas.value.width, canvas.value.height);
       hasDrawing.value = false;
       uploadCleaned.value = false;
+      clearRenderedImage();
     }
 
     function clearCanvas() {
@@ -121,8 +125,8 @@ export const StepSketch = {
       });
     }
 
-    async function cleanUpDrawing(blob) {
-      message.value = "Cleaning up your drawing...";
+    async function cleanUpDrawing(blob, report = (text) => { message.value = text; }) {
+      report("Cleaning up your drawing...");
       try {
         const { extractLineDrawing } = await import("/js/pipeline/pipeline.js");
         const { outputBlob } = await extractLineDrawing(blob);
@@ -132,7 +136,7 @@ export const StepSketch = {
         console.warn("Line-extraction pipeline failed, using raw drawing:", err);
         return { blob, cleaned: false };
       } finally {
-        message.value = "";
+        report("");
       }
     }
 
@@ -156,15 +160,20 @@ export const StepSketch = {
       }
     }
 
-    async function createAvatarFromCanvas(onProgress) {
-      const raw = await new Promise((resolve) =>
-        canvas.value.toBlob(resolve, "image/png"));
-      const blob = uploadCleaned.value ? raw : (await cleanUpDrawing(raw)).blob;
-      const avatar = await api.createAvatar(blob, onProgress);
-      setAvatar(avatar);
-      // A previous render belonged to the old drawing.
+    function clearRenderedImage() {
       renderedImage.value = null;
       renderError.value = null;
+    }
+
+    async function drawingBlob(report) {
+      const raw = await new Promise((resolve) =>
+        canvas.value.toBlob(resolve, "image/png"));
+      return uploadCleaned.value ? raw : (await cleanUpDrawing(raw, report)).blob;
+    }
+
+    async function createAvatarFromDrawing(drawingBlob, onProgress) {
+      const avatar = await api.createAvatar(drawingBlob, onProgress);
+      setAvatar(avatar);
       return avatar;
     }
 
@@ -173,7 +182,9 @@ export const StepSketch = {
       error.value = null;
       progress.value = 0;
       try {
-        await createAvatarFromCanvas((fraction, msg) => {
+        const imageBlob = await drawingBlob(
+          (text) => { message.value = text; });
+        await createAvatarFromDrawing(imageBlob, (fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
         });
@@ -186,16 +197,17 @@ export const StepSketch = {
     }
 
     async function renderImage() {
-      if (renderBusy.value || !renderPrompt.value.trim()
+      if (renderBusy.value || busy.value || !renderPrompt.value.trim()
           || (!hasDrawing.value && !state.avatar)) return;
       renderBusy.value = true;
       renderError.value = null;
       renderProgress.value = 0;
+      renderedImage.value = null;
       try {
         // No progress callback here: this is rigging the avatar, not
         // rendering it, so its (mock, staged) progress messages don't
         // belong on the render progress bar — they'd just be confusing.
-        const avatar = state.avatar || await createAvatarFromCanvas();
+        const avatar = state.avatar || await createAvatarFromDrawing(await drawingBlob());
         renderProgress.value = 0;
         const result = await api.renderAvatar(avatar.id, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
@@ -255,11 +267,14 @@ export const StepSketch = {
             </button>
           </div>
           <div class="row">
-            <button class="ghost" :disabled="!undoStack.length" @click="undo">Undo</button>
-            <button class="ghost" @click="clearCanvas">Clear</button>
+            <button class="ghost"
+                    :disabled="!undoStack.length || busy || renderBusy"
+                    @click="undo">Undo</button>
+            <button class="ghost" :disabled="busy || renderBusy"
+                    @click="clearCanvas">Clear</button>
             <label class="ghost file">
               Upload a photo
-              <input type="file" accept="image/*" :disabled="busy"
+              <input type="file" accept="image/*" :disabled="busy || renderBusy"
                      @change="loadFile" hidden>
             </label>
           </div>
@@ -270,9 +285,9 @@ export const StepSketch = {
           <div class="prompt-row">
             <input v-model="renderPrompt" type="text"
                    placeholder="e.g. a friendly robot with a cape, bold colors"
-                   @keyup.enter="renderImage" :disabled="renderBusy">
+                   @keyup.enter="renderImage" :disabled="renderBusy || busy">
             <button class="primary"
-                    :disabled="renderBusy || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
+                    :disabled="renderBusy || busy || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
@@ -293,12 +308,12 @@ export const StepSketch = {
           <img v-if="renderedImage" :src="renderedImage" alt="Rendered avatar"
                class="rendered-image">
 
-          <button class="primary" :disabled="!hasDrawing || busy"
+          <button class="primary" :disabled="!hasDrawing || busy || renderBusy"
                   @click="bringToLife">
             {{ busy ? 'Working…' : 'Bring it to life' }}
           </button>
-          <p class="muted">Builds a rigged skeleton from your drawing and
-             takes you to the Teach step.</p>
+          <p class="muted">Builds a rigged skeleton directly from your drawing,
+             then opens Teach.</p>
 
           <div v-if="busy" class="progress">
             <div class="progress-bar" :style="{ width: percent + '%' }"></div>

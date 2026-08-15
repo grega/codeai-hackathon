@@ -338,6 +338,13 @@ def _translate(exc: Exception) -> BedrockError:
     if isinstance(response, dict):
         code = response.get("Error", {}).get("Code", "")
 
+    if (code or name) == "ValidationException" \
+            and "model identifier is invalid" in str(exc).lower():
+        message = "The server's image model isn't available in its AWS region."
+        status = 503
+        log(f"[bedrock] {code or name}: {exc}")
+        return BedrockError(message, status=status, detail=f"{code or name}: {exc}")
+
     known = {
         "AccessDeniedException": (
             "This server isn't allowed to use that model.", 403),

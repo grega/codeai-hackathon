@@ -33,12 +33,29 @@ PROVIDER_RIGGING = os.environ.get("PROVIDER_RIGGING", "mock")
 PROVIDER_POSING = os.environ.get("PROVIDER_POSING", "mock")
 PROVIDER_TRAINING = os.environ.get("PROVIDER_TRAINING", "mock")
 
+#: Server-to-server auto-rigging service. The browser never receives this URL.
+RIGGING_SERVICE_URL = os.environ.get("RIGGING_SERVICE_URL", "").strip().rstrip("/")
+
+#: Overall deadline for classify, mesh generation, joint inference, rigging,
+#: and the final GLB download.
+RIGGING_SERVICE_TIMEOUT = float(
+    os.environ.get("RIGGING_SERVICE_TIMEOUT", "300"))
+
+#: Delay between remote mesh/rig task status checks.
+RIGGING_POLL_INTERVAL = float(
+    os.environ.get("RIGGING_POLL_INTERVAL", "5"))
+
 #: Episodes per second pushed to the browser at speed 1.0. The training screen
 #: multiplies this by its speed control.
 EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
 
 #: Max upload size for a sketch.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))
+
+#: Path to a rigged GLB the mock rigger should serve instead of the procedural
+#: figure. Lets the whole GLB path be exercised before a real rigger exists:
+#:   MOCK_RIG_GLB=tests/fixtures/mixamo-style.glb flask --app app run
+MOCK_RIG_GLB = os.environ.get("MOCK_RIG_GLB", "").strip()
 
 #: How long a provider gets before the job runner gives up on it.
 PROVIDER_TIMEOUT = float(os.environ.get("PROVIDER_TIMEOUT", "120"))
@@ -84,11 +101,11 @@ LLM_RATE_PER_DAY = int(os.environ.get("LLM_RATE_PER_DAY", "500"))
 
 
 # --------------------------------------------------------------------------
-# Sketch-render feature (POST /api/avatars/<id>/render)
+# Sketch-render feature (POST /api/renders)
 # --------------------------------------------------------------------------
 # A purpose-built, browser-facing endpoint — unlike the prompt endpoint above,
-# the frontend is meant to call this one. It takes a fixed shape (an avatar's
-# saved drawing plus a short prompt) and always invokes the same model, so
+# the frontend is meant to call this one. It takes a fixed shape (an uploaded
+# drawing plus a short prompt) and always invokes the same model, so
 # there's no caller-selectable model_id and therefore no allowlist. It still
 # shares BEDROCK_REGION/AWS credentials and fails closed the same way: no
 # region configured means bedrock._get_client() refuses before anything runs.

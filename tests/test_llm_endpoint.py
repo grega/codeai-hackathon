@@ -159,6 +159,26 @@ class TestRateLimiting:
 
 
 class TestErrorTranslation:
+    def test_invalid_model_identifier_is_reported_as_server_configuration(self):
+        class InvalidModelError(Exception):
+            response = {"Error": {"Code": "ValidationException"}}
+
+        translated = bedrock._translate(InvalidModelError(
+            "The provided model identifier is invalid."))
+
+        assert translated.status == 503
+        assert "AWS region" in translated.message
+
+    def test_other_validation_errors_still_describe_the_request(self):
+        class InvalidRequestError(Exception):
+            response = {"Error": {"Code": "ValidationException"}}
+
+        translated = bedrock._translate(InvalidRequestError(
+            "The request payload is malformed."))
+
+        assert translated.status == 400
+        assert translated.message == "That request wasn't valid for this model."
+
     def test_aws_detail_is_kept_off_the_wire(self, client, enabled, monkeypatch):
         """AWS messages name account IDs and ARNs; callers must not see them."""
         secret = "arn:aws:iam::123456789012:role/SuperSecretRole"

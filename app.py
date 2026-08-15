@@ -7,6 +7,7 @@ serialise the result — no domain logic lives here. See CONTRACT.md.
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -14,9 +15,11 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 
 import bedrock
 import config
+import export
 import providers
 from auth import RateLimiter, limiter, require_token
 from jobs import runner
+from logs import log
 from rewards import TERM_LABELS
 from schemas import (
     Clip,
@@ -143,7 +146,18 @@ def get_avatar_glb(avatar_id: str):
     avatar = store.get_avatar(avatar_id)
     if not avatar or not avatar.rig.glb_bytes:
         return fail("That avatar has no GLB — it's drawn procedurally.", 404)
-    return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary")
+    # Without validators a browser heuristically caches a 3MB binary and never
+    # asks again — so a swapped fixture keeps rendering the old body with no
+    # sign anything is stale. An ETag over the bytes plus no-cache means the
+    # browser always revalidates, but pays for the transfer only when the
+    # content actually differs (304 otherwise).
+    etag = hashlib.sha256(avatar.rig.glb_bytes).hexdigest()[:32]
+    if request.if_none_match.contains(etag):
+        return Response(status=304, headers={"ETag": f'"{etag}"',
+                                             "Cache-Control": "no-cache"})
+
+    return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary",
+                    headers={"ETag": f'"{etag}"', "Cache-Control": "no-cache"})
 
 
 @app.post("/api/avatars/<avatar_id>/render")
@@ -303,6 +317,58 @@ def get_run(run_id: str):
     if not run:
         return fail("That training run doesn't exist.", 404)
     return jsonify(run.to_json())
+
+
+# --------------------------------------------------------------------------
+# Training output
+#
+# What a finished run produces, for whatever comes next. Two artifacts because
+# they have different audiences: the GLB is for rendering and 3D tools, the
+# JSON is for the animation step. See export.py — in particular, do not hand
+# the GLB to a language model.
+# --------------------------------------------------------------------------
+
+def _export_inputs(run_id: str):
+    """Resolve a run to (run, avatar, clip), or raise ExportError."""
+    run = store.get_run(run_id)
+    if not run:
+        raise export.ExportError("That training run doesn't exist.", 404)
+    avatar = store.get_avatar(run.avatar_id)
+    if not avatar:
+        raise export.ExportError("That avatar is no longer around.", 404,
+                                 "avatar evicted from the in-memory store")
+    return run, avatar, run.target_clip
+
+
+@app.get("/api/training/runs/<run_id>/export.glb")
+def export_run_glb(run_id: str):
+    """The learned pose, baked into the avatar's own model."""
+    try:
+        run, avatar, clip = _export_inputs(run_id)
+        data, _ = export.build_glb(run, avatar, clip)
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[export] {run_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+
+    name = f"{clip.name.replace(' ', '-').lower()}-{run_id}.glb"
+    return Response(data, mimetype="model/gltf-binary", headers={
+        "Content-Disposition": f'attachment; filename="{name}"',
+        "Cache-Control": "no-cache",
+    })
+
+
+@app.get("/api/training/runs/<run_id>/export.json")
+def export_run_json(run_id: str):
+    """Bones, start pose, end pose, provenance — the animation step's input."""
+    try:
+        run, avatar, clip = _export_inputs(run_id)
+        document = export.build_document(run, avatar, clip)
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[export] {run_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+    return jsonify(document)
 
 
 @app.get("/api/training/runs/<run_id>/events")

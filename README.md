@@ -90,8 +90,17 @@ PROVIDER_POSING=real .venv/bin/flask --app app run
 The UI status bar shows which are active. Adding one:
 [docs/adding-a-provider.md](docs/adding-a-provider.md).
 
-Other vars: `EPISODE_RATE` (episodes/sec at speed 1, default 20), `DATA_DIR`,
-`MAX_UPLOAD_BYTES`.
+The real rigger calls the supplied ngrok service only from Flask:
+
+```bash
+RIGGING_SERVICE_URL=https://carie-spatterdashed-vella.ngrok-free.dev \
+PROVIDER_RIGGING=real .venv/bin/flask --app app run
+```
+
+`RIGGING_SERVICE_TIMEOUT` is the overall remote deadline (default 300 seconds)
+and `RIGGING_POLL_INTERVAL` controls mesh/rig status polling (default 5
+seconds). Other vars: `EPISODE_RATE` (episodes/sec at speed 1, default 20),
+`DATA_DIR`, `MAX_UPLOAD_BYTES`.
 
 ## Bedrock prompt endpoint
 
