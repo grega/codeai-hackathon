@@ -102,10 +102,14 @@ RIGGING_SERVICE_URL=https://carie-spatterdashed-vella.ngrok-free.dev \
 PROVIDER_RIGGING=real .venv/bin/flask --app app run
 ```
 
+On a cache miss it classifies the drawing, generates two T-pose augmentations,
+automatically confirms candidate A, and then runs mesh generation, joint
+inference, and rigging. Existing completed rigs skip those build steps.
+
 `RIGGING_SERVICE_TIMEOUT` is the overall remote deadline (default 300 seconds)
-and `RIGGING_POLL_INTERVAL` controls mesh/rig status polling (default 5
-seconds). Other vars: `EPISODE_RATE` (episodes/sec at speed 1, default 20),
-`DATA_DIR`, `MAX_UPLOAD_BYTES`.
+including augmentation, and `RIGGING_POLL_INTERVAL` controls mesh/rig status
+polling (default 5 seconds). Other vars: `EPISODE_RATE` (episodes/sec at speed
+1, default 20), `DATA_DIR`, `MAX_UPLOAD_BYTES`.
 
 ## Bedrock prompt endpoint
 

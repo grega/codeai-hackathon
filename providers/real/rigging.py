@@ -259,7 +259,6 @@ class RealRigger(Rigger):
                 "a person with a head, two arms, and two legs!",
                 detail=f"non-humanoid classification: {label!r}")
 
-        progress(0.14, "Turning your drawing into a 3D shape...")
         classify_id = self._find_value(classification, "classify_id")
         if not isinstance(classify_id, (str, int)) or isinstance(classify_id, bool):
             raise ProviderError(
@@ -280,18 +279,49 @@ class RealRigger(Rigger):
             progress(0.99, "Your avatar is ready!")
             return rig
 
+        progress(0.14, "Posing your character for its new skeleton...")
+        augmentation = self._request_json(
+            "POST", f"/augment_image?{classify_query}", deadline)
+        image_a_url = self._find_value(augmentation, "image_a_url")
+        image_b_url = self._find_value(augmentation, "image_b_url")
+        if not all(
+            isinstance(url, str) and url.strip()
+            for url in (image_a_url, image_b_url)
+        ):
+            raise ProviderError(
+                "The avatar builder sent back an incomplete pose. Try again?",
+                detail=(
+                    "augment_image response had invalid image URLs: "
+                    f"{augmentation!r}"
+                ),
+            )
+
+        progress(0.22, "Choosing the first pose...")
+        confirmation = self._request_json(
+            "POST",
+            f"/augment_image/confirm?{classify_query}&choice=a",
+            deadline,
+        )
+        choice = self._find_value(confirmation, "choice")
+        if not isinstance(choice, str) or choice.strip().lower() != "a":
+            raise ProviderError(
+                "The avatar builder couldn't choose a pose. Try again?",
+                detail=f"augment_image confirmation was incomplete: {confirmation!r}",
+            )
+
+        progress(0.25, "Turning your drawing into a 3D shape...")
         mesh_task = self._request_json(
             "POST", f"/mesh?{classify_query}", deadline)
         mesh_url = self._await_url(
             "mesh", mesh_task, deadline, progress,
-            progress_range=(0.16, 0.50),
+            progress_range=(0.26, 0.52),
             url_keys=(
                 "mesh_url", "model_url", "glb_url", "download_url",
                 "result_url", "output_url", "file_url", "url",
             ),
             message="Building the 3D shape...")
 
-        progress(0.55, "Finding the head, arms and legs...")
+        progress(0.57, "Finding the head, arms and legs...")
         joint_response = self._request_json(
             "POST", f"/infer_joints?{classify_query}", deadline)
         joints = self._find_value(

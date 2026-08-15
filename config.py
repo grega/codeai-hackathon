@@ -36,8 +36,8 @@ PROVIDER_TRAINING = os.environ.get("PROVIDER_TRAINING", "mock")
 #: Server-to-server auto-rigging service. The browser never receives this URL.
 RIGGING_SERVICE_URL = os.environ.get("RIGGING_SERVICE_URL", "").strip().rstrip("/")
 
-#: Overall deadline for classify, mesh generation, joint inference, rigging,
-#: and the final GLB download.
+#: Overall deadline for classification, T-pose augmentation, mesh generation,
+#: joint inference, rigging, and the final GLB download.
 RIGGING_SERVICE_TIMEOUT = float(
     os.environ.get("RIGGING_SERVICE_TIMEOUT", "300"))
 

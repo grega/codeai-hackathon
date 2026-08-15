@@ -153,6 +153,16 @@ def successful_responses(
     return [
         ("/classify", {"category": "humanoid", "classify_id": "drawing-1"}),
         ("/results/drawing-1/drawing-1_rigged.glb", cache_miss or not_found()),
+        ("/augment_image?classify_id=drawing-1", {
+            "status": "ok",
+            "image_a_url": "/results/drawing-1/augmented-a.png",
+            "image_b_url": "/results/drawing-1/augmented-b.png",
+        }),
+        ("/augment_image/confirm?classify_id=drawing-1&choice=a", {
+            "status": "ok",
+            "choice": "a",
+            "active_image_url": "/results/drawing-1/augmented-a.png",
+        }),
         ("/mesh?classify_id=drawing-1", {"status": "completed",
                    "mesh_url": "http://worker.internal/files/mesh.glb"}),
         ("/infer_joints?classify_id=drawing-1",
@@ -189,7 +199,7 @@ def test_immediate_cache_hits_return_rewritten_glb():
 
     assert opener.requests[0].data == b"png"
     assert opener.requests[0].get_header("Content-type") == "image/png"
-    assert opener.requests[3].data is None
+    assert all(request.data is None for request in opener.requests[2:5])
 
 
 def test_existing_rig_is_downloaded_without_restarting_remote_tasks():
@@ -222,6 +232,12 @@ def test_async_mesh_and_rig_tasks_are_polled():
         ("/classify", {
             "result": {"label": "person"}, "classify_id": "drawing/1"}),
         ("/results/drawing%2F1/drawing%2F1_rigged.glb", not_found()),
+        ("/augment_image?classify_id=drawing%2F1", {
+            "image_a_url": "/results/drawing%2F1/augmented-a.png",
+            "image_b_url": "/results/drawing%2F1/augmented-b.png",
+        }),
+        ("/augment_image/confirm?classify_id=drawing%2F1&choice=a",
+         {"status": "ok", "choice": "a"}),
         ("/mesh?classify_id=drawing%2F1",
          {"status": "queued", "task_id": "mesh 1"}),
         ("/mesh/status/mesh%201", {"status": "meshy", "progress": 10}),
@@ -249,7 +265,7 @@ def test_async_mesh_and_rig_tasks_are_polled():
 
     assert rig.glb_bytes
     assert sum(request.method == "GET" for request in opener.requests) == 13
-    assert any(0.16 < fraction <= 0.50 for fraction, _ in seen)
+    assert any(0.26 < fraction <= 0.52 for fraction, _ in seen)
     assert any(0.70 < fraction <= 0.90 for fraction, _ in seen)
 
 
@@ -284,6 +300,12 @@ def test_failed_remote_task_is_reported():
     rigger, _ = rigger_with([
         ("/classify", {"classification": "human", "classify_id": "drawing-1"}),
         ("/results/drawing-1/drawing-1_rigged.glb", not_found()),
+        ("/augment_image?classify_id=drawing-1", {
+            "image_a_url": "/results/drawing-1/augmented-a.png",
+            "image_b_url": "/results/drawing-1/augmented-b.png",
+        }),
+        ("/augment_image/confirm?classify_id=drawing-1&choice=a",
+         {"status": "ok", "choice": "a"}),
         ("/mesh?classify_id=drawing-1",
          {"status": "failed", "error": "out of GPU memory"}),
     ])
@@ -299,6 +321,80 @@ def test_invalid_download_is_rejected():
         rigger.rig(b"png", "image/png", lambda *_: None)
 
 
+@pytest.mark.parametrize("augmentation", [
+    {"image_b_url": "/results/drawing-1/augmented-b.png"},
+    {
+        "image_a_url": "/results/drawing-1/augmented-a.png",
+        "image_b_url": "",
+    },
+])
+def test_incomplete_augmentation_response_stops_before_mesh(augmentation):
+    rigger, opener = rigger_with([
+        ("/classify", {
+            "classification": "humanoid", "classify_id": "drawing-1"}),
+        ("/results/drawing-1/drawing-1_rigged.glb", not_found()),
+        ("/augment_image?classify_id=drawing-1", augmentation),
+    ])
+
+    with pytest.raises(ProviderError, match="invalid image URLs") as caught:
+        rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert "incomplete pose" in caught.value.user_message
+    assert len(opener.requests) == 3
+
+
+def test_incomplete_augmentation_confirmation_stops_before_mesh():
+    rigger, opener = rigger_with([
+        ("/classify", {
+            "classification": "humanoid", "classify_id": "drawing-1"}),
+        ("/results/drawing-1/drawing-1_rigged.glb", not_found()),
+        ("/augment_image?classify_id=drawing-1", {
+            "image_a_url": "/results/drawing-1/augmented-a.png",
+            "image_b_url": "/results/drawing-1/augmented-b.png",
+        }),
+        ("/augment_image/confirm?classify_id=drawing-1&choice=a",
+         {"status": "ok"}),
+    ])
+
+    with pytest.raises(ProviderError, match="confirmation was incomplete") as caught:
+        rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert "couldn't choose a pose" in caught.value.user_message
+    assert len(opener.requests) == 4
+
+
+@pytest.mark.parametrize("failed_target", ["augment", "confirm"])
+def test_augmentation_http_errors_stop_before_mesh(failed_target):
+    error = HTTPError(
+        "https://rigging.example.test/augment_image",
+        503,
+        "unavailable",
+        {},
+        None,
+    )
+    responses = [
+        ("/classify", {
+            "classification": "humanoid", "classify_id": "drawing-1"}),
+        ("/results/drawing-1/drawing-1_rigged.glb", not_found()),
+    ]
+    if failed_target == "augment":
+        responses.append(("/augment_image?classify_id=drawing-1", error))
+    else:
+        responses.extend([
+            ("/augment_image?classify_id=drawing-1", {
+                "image_a_url": "/results/drawing-1/augmented-a.png",
+                "image_b_url": "/results/drawing-1/augmented-b.png",
+            }),
+            ("/augment_image/confirm?classify_id=drawing-1&choice=a", error),
+        ])
+    rigger, opener = rigger_with(responses)
+
+    with pytest.raises(ProviderError, match="HTTP 503"):
+        rigger.rig(b"png", "image/png", lambda *_: None)
+
+    assert len(opener.requests) == len(responses)
+
+
 def test_overall_deadline_applies_while_polling():
     now = [0.0]
 
@@ -312,6 +408,12 @@ def test_overall_deadline_applies_while_polling():
         ("/classify", {
             "classification": "humanoid", "classify_id": "drawing-1"}),
         ("/results/drawing-1/drawing-1_rigged.glb", not_found()),
+        ("/augment_image?classify_id=drawing-1", {
+            "image_a_url": "/results/drawing-1/augmented-a.png",
+            "image_b_url": "/results/drawing-1/augmented-b.png",
+        }),
+        ("/augment_image/confirm?classify_id=drawing-1&choice=a",
+         {"status": "ok", "choice": "a"}),
         ("/mesh?classify_id=drawing-1",
          {"status": "queued", "task_id": "slow"}),
     ])
