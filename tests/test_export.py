@@ -117,17 +117,26 @@ class TestPosing:
         assert len(after) == 4
 
     def test_rest_pose_leaves_the_rig_at_bind(self, glb_bytes):
-        """A pose of all-identity must be a no-op, or 'start' is meaningless."""
+        """A pose of all-identity must be a no-op, or 'start' is meaningless.
+
+        Compares EFFECTIVE local rotations, not the raw `rotation` field: on a
+        matrix-form node an absent `rotation` means "read the matrix", not
+        identity, so comparing the field would pass a rig that had been
+        silently flattened to identity.
+        """
         document, _ = gltf.read_glb(glb_bytes)
         bones = gltf.resolve_bones(document)
-        before = {i: document["nodes"][i].get("rotation") for i in bones.values()}
+        before = {i: gltf._node_rotation(document["nodes"][i])
+                  for i in bones.values()}
 
         gltf.pose_glb(document, dict(REST_POSE), bones)
 
         for index, original in before.items():
-            now = document["nodes"][index].get("rotation")
-            for a, b in zip(now, original or [0, 0, 0, 1]):
-                assert a == pytest.approx(b, abs=1e-5)
+            now = gltf._node_rotation(document["nodes"][index])
+            # q and -q are the same rotation; compare on the shorter arc.
+            sign = -1.0 if sum(a * b for a, b in zip(now, original)) < 0 else 1.0
+            for a, b in zip(now, original):
+                assert a * sign == pytest.approx(b, abs=1e-5)
 
     def test_unmapped_nodes_keep_their_local_rotation(self, glb_bytes):
         """Fingers and Spine1/2 ride along with their parents rather than
@@ -144,6 +153,73 @@ class TestPosing:
 
         for index in unmapped:
             assert document["nodes"][index].get("rotation") == before[index]
+
+
+class TestMatrixFormNodes:
+    """glTF nodes may carry a 4x4 `matrix` INSTEAD of translation/rotation/scale,
+    and when they do the TRS fields are ignored entirely.
+
+    three's GLTFExporter writes `matrix`; Meshy's FBX pipeline writes TRS. A
+    posing routine that only writes `rotation` silently does nothing on the
+    former: the JSON gains a rotation nobody reads and the model renders at
+    bind. Caught only by rendering the result, so it is pinned here.
+    """
+
+    def test_the_fixture_really_is_matrix_form(self, glb_bytes):
+        """If this ever fails the fixture changed and the tests below stop
+        covering the case they exist for."""
+        document, _ = gltf.read_glb(glb_bytes)
+        bones = gltf.resolve_bones(document)
+        assert all("matrix" in document["nodes"][i] for i in bones.values())
+
+    def test_posing_converts_matrix_nodes_to_trs(self, glb_bytes):
+        document, _ = gltf.read_glb(glb_bytes)
+        bones = gltf.resolve_bones(document)
+        pose = dict(REST_POSE)
+        pose["L_shoulder"] = list(quat_from_euler(0, 0, -90))
+        gltf.pose_glb(document, pose, bones)
+
+        node = document["nodes"][bones["L_shoulder"]]
+        assert "matrix" not in node, "matrix left in place — rotation is ignored"
+        assert "rotation" in node
+
+    def test_decompose_round_trips_a_known_rotation(self):
+        """A 90 degrees z rotation as a column-major matrix."""
+        matrix = [0, 1, 0, 0,
+                  -1, 0, 0, 0,
+                  0, 0, 1, 0,
+                  0, 0, 0, 1]
+        translation, rotation, scale = gltf._decompose(matrix)
+        expected = quat_from_euler(0, 0, 90)
+        for a, b in zip(rotation, expected):
+            assert a == pytest.approx(b, abs=1e-6)
+        assert translation == [0, 0, 0]
+        for s in scale:
+            assert s == pytest.approx(1.0, abs=1e-9)
+
+    def test_decompose_keeps_translation_and_scale(self):
+        matrix = [2, 0, 0, 0,
+                  0, 3, 0, 0,
+                  0, 0, 4, 0,
+                  5, 6, 7, 1]
+        translation, _rotation, scale = gltf._decompose(matrix)
+        assert translation == [5, 6, 7]
+        assert scale == pytest.approx([2, 3, 4])
+
+    def test_conversion_preserves_the_bind_transform(self, glb_bytes):
+        """Rest pose on a matrix rig must leave the joint where it was."""
+        document, _ = gltf.read_glb(glb_bytes)
+        bones = gltf.resolve_bones(document)
+        index = bones["L_elbow"]
+        before = gltf._decompose(document["nodes"][index]["matrix"])
+
+        gltf.pose_glb(document, dict(REST_POSE), bones)
+        node = document["nodes"][index]
+
+        for a, b in zip(node["rotation"], before[1]):
+            assert a == pytest.approx(b, abs=1e-5)
+        for a, b in zip(node.get("translation", [0, 0, 0]), before[0]):
+            assert a == pytest.approx(b, abs=1e-5)
 
 
 class TestExportDocument:

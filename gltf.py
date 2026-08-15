@@ -145,9 +145,74 @@ def _conjugate(q):
     return (-q[0], -q[1], -q[2], q[3])
 
 
+def _decompose(matrix: list[float]):
+    """Split a glTF 4x4 (column-major) into translation, rotation, scale.
+
+    glTF lets a node carry EITHER translation/rotation/scale OR a single
+    `matrix`, and when `matrix` is present the TRS fields are ignored entirely.
+    three's GLTFExporter writes `matrix`; Meshy's FBX pipeline writes TRS. Miss
+    this and posing a matrix-form rig silently does nothing: the JSON gains a
+    `rotation` nobody reads and the model renders at bind.
+    """
+    # Column c, row r lives at matrix[c * 4 + r].
+    col = [matrix[0:3], matrix[4:7], matrix[8:11]]
+    translation = list(matrix[12:15])
+    scale = [max((sum(c * c for c in axis)) ** 0.5, 1e-12) for axis in col]
+
+    # A negative determinant means the basis is mirrored; fold that into the
+    # first axis so the remainder is a pure rotation.
+    det = (col[0][0] * (col[1][1] * col[2][2] - col[1][2] * col[2][1])
+           - col[1][0] * (col[0][1] * col[2][2] - col[0][2] * col[2][1])
+           + col[2][0] * (col[0][1] * col[1][2] - col[0][2] * col[1][1]))
+    if det < 0:
+        scale[0] = -scale[0]
+
+    r = [[col[c][row] / scale[c] for c in range(3)] for row in range(3)]
+    trace = r[0][0] + r[1][1] + r[2][2]
+    if trace > 0:
+        s = 0.5 / ((trace + 1.0) ** 0.5)
+        q = ((r[2][1] - r[1][2]) * s, (r[0][2] - r[2][0]) * s,
+             (r[1][0] - r[0][1]) * s, 0.25 / s)
+    elif r[0][0] > r[1][1] and r[0][0] > r[2][2]:
+        s = 2.0 * ((1.0 + r[0][0] - r[1][1] - r[2][2]) ** 0.5)
+        q = (0.25 * s, (r[0][1] + r[1][0]) / s,
+             (r[0][2] + r[2][0]) / s, (r[2][1] - r[1][2]) / s)
+    elif r[1][1] > r[2][2]:
+        s = 2.0 * ((1.0 + r[1][1] - r[0][0] - r[2][2]) ** 0.5)
+        q = ((r[0][1] + r[1][0]) / s, 0.25 * s,
+             (r[1][2] + r[2][1]) / s, (r[0][2] - r[2][0]) / s)
+    else:
+        s = 2.0 * ((1.0 + r[2][2] - r[0][0] - r[1][1]) ** 0.5)
+        q = ((r[0][2] + r[2][0]) / s, (r[1][2] + r[2][1]) / s,
+             0.25 * s, (r[1][0] - r[0][1]) / s)
+
+    length = sum(c * c for c in q) ** 0.5 or 1.0
+    return translation, tuple(c / length for c in q), scale
+
+
 def _node_rotation(node: dict[str, Any]):
+    """The node's local rotation, whichever form it is stored in."""
+    if "matrix" in node:
+        return _decompose(node["matrix"])[1]
     r = node.get("rotation")
     return tuple(r) if r else IDENTITY_QUAT
+
+
+def _set_node_rotation(node: dict[str, Any], q) -> None:
+    """Write a local rotation, converting a matrix node to TRS if needed.
+
+    Converting rather than recomposing the matrix is deliberate: glTF
+    animations target `translation`/`rotation`/`scale` channels and cannot
+    target `matrix`, so a TRS node is what the later animation-baking step will
+    need anyway.
+    """
+    if "matrix" in node:
+        translation, _rotation, scale = _decompose(node.pop("matrix"))
+        if any(abs(c) > 1e-9 for c in translation):
+            node["translation"] = [round(c, 6) for c in translation]
+        if any(abs(c - 1.0) > 1e-9 for c in scale):
+            node["scale"] = [round(c, 6) for c in scale]
+    node["rotation"] = [round(c, 6) for c in q]
 
 
 def _parents(document: dict[str, Any]) -> dict[int, int]:
@@ -219,7 +284,7 @@ def pose_glb(document: dict[str, Any], pose: dict[str, list[float]],
             # World-space rotations pre-multiply: delta THEN bind orientation.
             desired = quat_mul(deltas[bone], bind_world[index])
             local = quat_mul(_conjugate(parent_world), desired)
-            nodes[index]["rotation"] = [round(c, 6) for c in local]
+            _set_node_rotation(nodes[index], local)
             here = desired
         else:
             here = quat_mul(parent_world, _node_rotation(nodes[index]))
