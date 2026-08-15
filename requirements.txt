@@ -3,3 +3,8 @@ gunicorn>=23.0
 python-dotenv>=1.0
 boto3>=1.35
 pytest>=8.0
+
+# animator/ (the llm-animator endpoint's underlying CLI tool)
+numpy>=2.5.2
+openai>=3.0.0
+pygltflib>=1.16.5

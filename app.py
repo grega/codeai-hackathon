@@ -9,6 +9,9 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
+import sys
+import tempfile
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, request, send_file, send_from_directory
@@ -34,6 +37,23 @@ from training import TrainingRun
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = config.MAX_UPLOAD_BYTES
+
+# --------------------------------------------------------------------------
+# The animator/ directory (formerly phase2/) is a standalone CLI tool, not a
+# package -- its files use bare `import gltf_utils` etc. assuming their own
+# directory is on sys.path. Inserting it at position 0 makes `import animator`
+# resolve to animator/animator.py (the CLI's dispatcher module) rather than
+# the animator/ directory itself, which Python would otherwise also be
+# willing to treat as an (empty) implicit namespace package from repo root.
+# Deliberately does NOT import animator/main.py, which pulls in pywebview
+# (a desktop GUI toolkit) at module level -- not something to load into a
+# server process.
+# --------------------------------------------------------------------------
+ANIMATOR_DIR = Path(__file__).parent / "animator"
+sys.path.insert(0, str(ANIMATOR_DIR))
+import animator as llm_animator_core  # noqa: E402  (animator/animator.py)
+import gltf_utils as llm_animator_gltf_utils  # noqa: E402
+import llm_client as llm_animator_client  # noqa: E402
 
 # Keep dict order as declared. The bone tree is written parents-first in
 # schemas.py and reads far better that way in the API too; Flask would
@@ -67,7 +87,7 @@ def _not_found(_):
 @app.errorhandler(413)
 def _too_large(_):
     mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
-    return fail(f"That image is too big — keep it under {mb}MB.", 413)
+    return fail(f"That file is too big — keep it under {mb}MB.", 413)
 
 
 # --------------------------------------------------------------------------
@@ -443,6 +463,85 @@ def create_behaviour():
         trained=bool(body.get("trained")),
         best_reward=float(body.get("best_reward", 0.0)))
     return jsonify(behaviour.to_json()), 201
+
+
+# --------------------------------------------------------------------------
+# LLM animator — thin wrapper around the standalone animator/ CLI tool
+#
+# NOT part of the Rigger/Poser/Trainer contract (see CONTRACT.md): that
+# contract's "next step: animation" is a future Animator provider working on
+# the app's 16-bone skeleton and returning a Clip. This is a different, older
+# tool that bakes a glTF Animation directly into a GLB on whatever skeleton
+# the uploaded file has (e.g. a ~86-joint Mixamo rig) -- kept deliberately
+# separate, not retrofitted into the contract. One request field per CLI arg;
+# runs synchronously (no job/poll) since a call takes ~5-15s, and this
+# prototype's OpenRouter account is capped, so no rate limiting either.
+# --------------------------------------------------------------------------
+
+_LLM_ANIMATOR_OPENROUTER_MODEL = "anthropic/claude-sonnet-5"
+_LLM_ANIMATOR_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+
+
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
+@app.post("/api/llm-animator/generate")
+def llm_animator_generate():
+    prompt = (request.form.get("prompt") or "").strip() or None
+    input_file = request.files.get("input")
+    pose_b_file = request.files.get("pose_b")
+
+    if not prompt and not pose_b_file:
+        return fail("Provide a prompt, a pose_b GLB, or both.")
+
+    use_llm = not _truthy(request.form.get("no_llm"))
+    loop = _truthy(request.form.get("loop"))
+    model = (request.form.get("model") or "").strip() or None
+    base_url = (request.form.get("base_url") or "").strip() or None
+
+    if _truthy(request.form.get("openrouter")):
+        if not os.environ.get("OPENROUTER_API_KEY"):
+            return fail("Server isn't configured with an OpenRouter API key.", 500)
+        llm_animator_client.DEFAULT_MODEL = model or _LLM_ANIMATOR_OPENROUTER_MODEL
+        llm_animator_client.DEFAULT_BASE_URL = base_url or _LLM_ANIMATOR_OPENROUTER_BASE_URL
+    elif model or base_url:
+        llm_animator_client.DEFAULT_MODEL = model or llm_animator_client.DEFAULT_MODEL
+        llm_animator_client.DEFAULT_BASE_URL = base_url or llm_animator_client.DEFAULT_BASE_URL
+
+    with tempfile.TemporaryDirectory() as tmp_name:
+        tmp = Path(tmp_name)
+
+        if input_file:
+            input_path = tmp / "input.glb"
+            input_file.save(input_path)
+        else:
+            input_path = ANIMATOR_DIR / "rigged_human.glb"
+
+        gltf, joints = llm_animator_gltf_utils.load_skeleton(str(input_path))
+
+        try:
+            if pose_b_file:
+                pose_b_path = tmp / "pose_b.glb"
+                pose_b_file.save(pose_b_path)
+                _, joints_b = llm_animator_gltf_utils.load_skeleton(str(pose_b_path))
+                name, tracks = llm_animator_core.generate_transition(
+                    joints, joints_b, style_prompt=prompt, use_llm=use_llm, loop=loop)
+            else:
+                name, tracks = llm_animator_core.generate(prompt, gltf, joints, use_llm=use_llm)
+        except Exception as exc:
+            return fail(f"Animation generation failed: {exc}", 502)
+
+        llm_animator_gltf_utils.add_rotation_animation(gltf, tracks, name=name)
+
+        output_path = tmp / "result.glb"
+        llm_animator_gltf_utils.save(gltf, str(output_path))
+        data = output_path.read_bytes()
+
+    return Response(data, mimetype="model/gltf-binary", headers={
+        "X-Animation-Name": name,
+        "Content-Disposition": 'attachment; filename="result.glb"',
+    })
 
 
 # --------------------------------------------------------------------------
