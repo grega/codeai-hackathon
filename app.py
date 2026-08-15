@@ -213,18 +213,16 @@ def get_avatar_glb(avatar_id: str):
                     headers={"ETag": f'"{etag}"', "Cache-Control": "no-cache"})
 
 
-@app.post("/api/renders")
-def render_sketch():
-    """Render an uploaded drawing without creating or rigging an avatar."""
-    upload = request.files.get("image")
-    if upload is None:
-        return fail("No image was uploaded.")
+@app.post("/api/avatars/<avatar_id>/render")
+def render_avatar(avatar_id: str):
+    """Send the avatar's line drawing plus a prompt to Bedrock and get a
+    rendered image back — a purpose-specific endpoint, not the general
+    prompt pipe at /api/llm/generate (see the note above that route)."""
+    avatar = store.get_avatar(avatar_id)
+    if not avatar or not avatar.image_path:
+        return fail("That avatar doesn't exist.", 404)
 
-    image_bytes = upload.read()
-    if not image_bytes:
-        return fail("That image was empty. Try drawing something!")
-
-    prompt = request.form.get("prompt", "").strip()
+    prompt = (request.json or {}).get("prompt", "").strip()
     if not prompt:
         return fail("Describe how you'd like this rendered.")
     if len(prompt) > config.BEDROCK_MAX_PROMPT_CHARS:
@@ -235,11 +233,21 @@ def render_sketch():
     if refusal:
         return fail(refusal, 429)
 
+    image_bytes = Path(avatar.image_path).read_bytes()
+
     def work(progress):
         try:
-            result = bedrock.render_sketch(image_bytes, prompt)
+            # The T-pose transform prefers this render as its source (see
+            # tpose_avatar below), so it needs to hold full-body framing
+            # itself — a close-up here can't be recovered later.
+            result = bedrock.render_sketch(
+                image_bytes, f"{prompt}, {bedrock.FULL_BODY_HINT}",
+                negative_prompt=bedrock.FULL_BODY_NEGATIVE_HINT)
         except bedrock.BedrockError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
+        # The player's actual designed look, not just the raw sketch — later
+        # steps (the T-pose transform) prefer this over avatar.image_path.
+        store.set_rendered_image(avatar_id, result["image_bytes"])
         return {
             "image_base64": base64.b64encode(result["image_bytes"]).decode("ascii"),
             "output_format": result["output_format"],
@@ -255,17 +263,24 @@ def tpose_avatar(avatar_id: str):
     """Turn the avatar into a forward-facing, T-pose, transparent-background
     PNG, via bedrock.tpose_transform. Fixed shape, no request body — always
     the same transform, so nothing to validate beyond the avatar existing.
-    The source is the same sketch sent to rigging; render previews are
-    independent and never replace it."""
+
+    Always built from the avatar's most recent /render output, never the raw
+    line drawing: a plain black-on-white sketch gives Bedrock nothing to work
+    with for colour or style, and testing found no way to reliably recover a
+    good pose from it. Refuses if nothing has been rendered yet rather than
+    silently falling back to the sketch."""
     avatar = store.get_avatar(avatar_id)
     if not avatar or not avatar.image_path:
         return fail("That avatar doesn't exist.", 404)
+    if not avatar.rendered_image_bytes:
+        return fail("Render your avatar first — the posed version is built "
+                     "from that.", 400)
 
     refusal = tpose_limiter.check(request.remote_addr or "unknown")
     if refusal:
         return fail(refusal, 429)
 
-    image_bytes = Path(avatar.image_path).read_bytes()
+    image_bytes = avatar.rendered_image_bytes
 
     def work(progress):
         try:

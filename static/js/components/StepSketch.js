@@ -2,7 +2,7 @@
 
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
-import { generatePosedAvatar, setAvatar, goTo } from "../store.js";
+import { generatePosedAvatar, setAvatar, state, goTo } from "../store.js";
 
 export const StepSketch = {
   setup() {
@@ -192,9 +192,6 @@ export const StepSketch = {
     async function createAvatarFromDrawing(drawingBlob, onProgress) {
       const avatar = await api.createAvatar(drawingBlob, onProgress);
       setAvatar(avatar);
-      // Fire-and-forget: tracked on the shared store so it survives
-      // navigating on to "Teach" rather than blocking this step's caller.
-      generatePosedAvatar();
       return avatar;
     }
 
@@ -220,17 +217,24 @@ export const StepSketch = {
 
     async function renderImage() {
       if (renderBusy.value || busy.value || glbBusy.value
-          || !renderPrompt.value.trim() || !hasDrawing.value) return;
+          || !renderPrompt.value.trim()
+          || (!hasDrawing.value && !state.avatar)) return;
       renderBusy.value = true;
       renderError.value = null;
       renderProgress.value = 0;
       renderedImage.value = null;
       try {
-        const imageBlob = await drawingBlob(
-          (text) => { renderMessage.value = text; });
-        const result = await api.renderSketch(imageBlob, renderPrompt.value,
+        // No progress callback here: this is rigging the avatar, not
+        // rendering it, so its (mock, staged) progress messages don't
+        // belong on the render progress bar — they'd just be confusing.
+        const avatar = state.avatar || await createAvatarFromDrawing(await drawingBlob());
+        renderProgress.value = 0;
+        const result = await api.renderAvatar(avatar.id, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
         renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
+        // The T-pose download should reflect what was just designed here,
+        // not the plain sketch it started from — redo it against the render.
+        generatePosedAvatar();
       } catch (err) {
         renderError.value = err.message;
       } finally {
@@ -239,7 +243,7 @@ export const StepSketch = {
     }
 
     return {
-      canvas, busy, progress, message, error, hasDrawing,
+      canvas, busy, progress, message, error, hasDrawing, state,
       glbBusy,
       renderPrompt, renderBusy, renderError, renderedImage,
       tool, undoStack,
@@ -307,15 +311,17 @@ export const StepSketch = {
                    :disabled="renderBusy || busy || glbBusy">
             <button class="primary"
                     :disabled="renderBusy || busy || glbBusy
-                               || !renderPrompt.trim() || !hasDrawing"
+                               || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
           </div>
-          <p class="muted" v-if="!hasDrawing">Draw something
+          <p class="muted" v-if="!hasDrawing && !state.avatar">Draw something
              on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
-             a Bedrock image model and shows what it renders.</p>
+             a Bedrock image model and shows what it renders. This also
+             starts posing a downloadable version in the background — it
+             needs a render to work from, so drawing alone isn't enough.</p>
 
           <div v-if="renderBusy" class="progress">
             <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>
