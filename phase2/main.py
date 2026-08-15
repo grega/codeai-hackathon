@@ -32,11 +32,14 @@ def build(
     output_path: str,
     use_llm: bool = True,
     pose_b_path: str | None = None,
+    loop: bool = False,
 ) -> str:
     gltf, joints = gltf_utils.load_skeleton(input_path)
     if pose_b_path is not None:
         _gltf_b, joints_b = gltf_utils.load_skeleton(pose_b_path)
-        name, tracks = animator.generate_transition(joints, joints_b, style_prompt=prompt, use_llm=use_llm)
+        name, tracks = animator.generate_transition(
+            joints, joints_b, style_prompt=prompt, use_llm=use_llm, loop=loop
+        )
     else:
         name, tracks = animator.generate(prompt, gltf, joints, use_llm=use_llm)
     gltf_utils.add_rotation_animation(gltf, tracks, name=name)
@@ -66,6 +69,11 @@ def main() -> None:
         "--pose-b", default=None,
         help="desired end-pose GLB; switches to pose-to-pose transition mode "
              "(prompt becomes optional style guidance)",
+    )
+    parser.add_argument(
+        "--loop", action="store_true",
+        help="only with --pose-b: append the transition in reverse so it ends back on "
+             "the start pose, for a seamless loop instead of a hard snap-back",
     )
     parser.add_argument("--output", default="out.glb", help="filename written inside output/")
     parser.add_argument("--no-llm", action="store_true", help="skip the LLM, use hardcoded/deterministic fallback only")
@@ -110,7 +118,10 @@ def main() -> None:
 
     def _generate_then_load(window: webview.Window) -> None:
         try:
-            anim_name = build(args.prompt, args.input, output_path, use_llm=not args.no_llm, pose_b_path=args.pose_b)
+            anim_name = build(
+                args.prompt, args.input, output_path,
+                use_llm=not args.no_llm, pose_b_path=args.pose_b, loop=args.loop,
+            )
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             window.load_url(_status_url(base_url, error=str(e)))

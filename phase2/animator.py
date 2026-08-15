@@ -164,12 +164,30 @@ def _transition_fallback(
     return tracks
 
 
+def _mirror_for_loop(
+    tracks: dict[str, tuple[list[float], list[np.ndarray]]],
+) -> dict[str, tuple[list[float], list[np.ndarray]]]:
+    """Append each track's own keyframes in reverse, so the animation returns to its
+    start pose instead of ending on the target pose -- turns the viewer's hard
+    end-of-clip-to-frame-0 snap into a continuous back-and-forth loop. Mirrors around
+    each track's own last keyframe time rather than a single shared duration, since
+    per-joint timing can differ (the LLM is allowed to stagger joints)."""
+    mirrored = {}
+    for key, (times, quats) in tracks.items():
+        end_time = times[-1]
+        loop_times = list(times) + [2 * end_time - t for t in reversed(times[:-1])]
+        loop_quats = list(quats) + list(reversed(quats[:-1]))
+        mirrored[key] = (loop_times, loop_quats)
+    return mirrored
+
+
 def generate_transition(
     joints_a: list[Joint],
     joints_b: list[Joint],
     duration: float = 2.0,
     style_prompt: str | None = None,
     use_llm: bool = True,
+    loop: bool = False,
 ) -> tuple[str, dict[int, tuple[list[float], list[np.ndarray]]]]:
     pose_a = extract_pose(joints_a)
     pose_b = extract_pose(joints_b)
@@ -190,6 +208,9 @@ def generate_transition(
 
     if tracks_by_name is None:
         tracks_by_name = _transition_fallback(start_pose, end_pose, duration)
+
+    if loop:
+        tracks_by_name = _mirror_for_loop(tracks_by_name)
 
     by_name = {j.name: j.node_index for j in joints_a}
     tracks = {by_name[name]: value for name, value in tracks_by_name.items() if name in by_name}
