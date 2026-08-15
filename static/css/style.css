@@ -152,6 +152,10 @@ button:active:not(:disabled), .file:active {
   transform: translateY(3px); box-shadow: none;
 }
 button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: translateY(3px); }
+.file.disabled {
+  opacity: .45; cursor: not-allowed; box-shadow: none; transform: translateY(3px);
+  pointer-events: none;
+}
 button.primary { background: var(--brand); color: #fff; }
 button.primary:hover:not(:disabled) { background: var(--brand-dark); }
 button.ghost:hover:not(:disabled) { background: var(--brand-soft); }
@@ -215,6 +219,11 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 .rendered-image {
   width: 100%; display: block; margin-bottom: .9rem;
   border-radius: var(--radius); border: var(--edge); box-shadow: var(--lift-sm);
+}
+.sideload-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .8rem; flex-wrap: wrap; margin-top: 1rem; padding-top: 1rem;
+  border-top: 2px dashed var(--line);
 }
 
 /* -- 3d stage ----------------------------------------------------------- */
@@ -418,7 +427,14 @@ input[type="range"] { width: 100%; accent-color: var(--brand); }
 }
 @media (max-width: 640px) {
   main { padding: 1rem; }
-  .topbar { padding: .75rem 1rem; }
+  .topbar { padding: .75rem 1rem; align-items: flex-start; }
+  .topbar h1 { width: 100%; }
+  .steps {
+    width: 100%; min-width: 0;
+    display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .step-tab { width: 100%; min-width: 0; padding-right: .5rem; }
+  .step-tab .label, .step-tab .hint { min-width: 0; overflow-wrap: anywhere; }
   .render-controls { grid-template-columns: 1fr; }
   .render-bar { align-items: stretch; flex-direction: column; }
   .render-bar button { width: 100%; }

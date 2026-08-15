@@ -59,6 +59,11 @@ Real GLB rigs must expose the 16 contract bone names from `schemas.py`. The same
 viewport path applies the JSON clip to procedural and GLB rigs, which keeps the
 mock and real provider workflows aligned.
 
+To skip drawing and auto-rigging, use **Load GLB** on the Draw step. The upload
+must be a skinned binary glTF with all 16 contract bones, either under their
+contract names or the supported Mixamo aliases. GLB sideloads are not subject
+to the sketch upload limit.
+
 ## Deploy
 
 Heroku, via the `Procfile` / `.python-version` / `app.json` in this repo:

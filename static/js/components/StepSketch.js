@@ -11,6 +11,7 @@ export const StepSketch = {
     const progress = ref(0);
     const message = ref("");
     const error = ref(null);
+    const glbBusy = ref(false);
     const hasDrawing = ref(false);
     const uploadCleaned = ref(false);
     const renderPrompt = ref("");
@@ -68,7 +69,7 @@ export const StepSketch = {
     }
 
     function start(event) {
-      if (busy.value || renderBusy.value) return;
+      if (busy.value || renderBusy.value || glbBusy.value) return;
       pushUndoSnapshot();
       clearRenderedImage();
       drawing = true;
@@ -142,7 +143,7 @@ export const StepSketch = {
 
     async function loadFile(event) {
       const file = event.target.files?.[0];
-      if (!file) return;
+      if (!file || glbBusy.value) return;
       pushUndoSnapshot();
       busy.value = true;
       error.value = null;
@@ -156,6 +157,23 @@ export const StepSketch = {
         error.value = err.message;
       } finally {
         busy.value = false;
+        event.target.value = "";
+      }
+    }
+
+    async function loadGlb(event) {
+      const file = event.target.files?.[0];
+      if (!file || busy.value || renderBusy.value || glbBusy.value) return;
+      glbBusy.value = true;
+      error.value = null;
+      try {
+        const avatar = await api.sideloadAvatar(file);
+        setAvatar(avatar);
+        goTo("pose");
+      } catch (err) {
+        error.value = err.message;
+      } finally {
+        glbBusy.value = false;
         event.target.value = "";
       }
     }
@@ -181,6 +199,7 @@ export const StepSketch = {
     }
 
     async function bringToLife() {
+      if (busy.value || renderBusy.value || glbBusy.value) return;
       busy.value = true;
       error.value = null;
       progress.value = 0;
@@ -200,8 +219,8 @@ export const StepSketch = {
     }
 
     async function renderImage() {
-      if (renderBusy.value || busy.value || !renderPrompt.value.trim()
-          || !hasDrawing.value) return;
+      if (renderBusy.value || busy.value || glbBusy.value
+          || !renderPrompt.value.trim() || !hasDrawing.value) return;
       renderBusy.value = true;
       renderError.value = null;
       renderProgress.value = 0;
@@ -221,9 +240,10 @@ export const StepSketch = {
 
     return {
       canvas, busy, progress, message, error, hasDrawing,
+      glbBusy,
       renderPrompt, renderBusy, renderError, renderedImage,
       tool, undoStack,
-      start, move, end, clearCanvas, loadFile, bringToLife, renderImage, undo,
+      start, move, end, clearCanvas, loadFile, loadGlb, bringToLife, renderImage, undo,
       percent: computed(() => Math.round(progress.value * 100)),
       renderPercent: computed(() => Math.round(renderProgress.value * 100)),
       renderMessage,
@@ -265,13 +285,14 @@ export const StepSketch = {
           </div>
           <div class="row">
             <button class="ghost"
-                    :disabled="!undoStack.length || busy || renderBusy"
+                    :disabled="!undoStack.length || busy || renderBusy || glbBusy"
                     @click="undo">Undo</button>
-            <button class="ghost" :disabled="busy || renderBusy"
+            <button class="ghost" :disabled="busy || renderBusy || glbBusy"
                     @click="clearCanvas">Clear</button>
             <label class="ghost file">
               Upload a photo
-              <input type="file" accept="image/*" :disabled="busy || renderBusy"
+              <input type="file" accept="image/*"
+                     :disabled="busy || renderBusy || glbBusy"
                      @change="loadFile" hidden>
             </label>
           </div>
@@ -282,9 +303,11 @@ export const StepSketch = {
           <div class="prompt-row">
             <input v-model="renderPrompt" type="text"
                    placeholder="e.g. a friendly robot with a cape, bold colors"
-                   @keyup.enter="renderImage" :disabled="renderBusy || busy">
+                   @keyup.enter="renderImage"
+                   :disabled="renderBusy || busy || glbBusy">
             <button class="primary"
-                    :disabled="renderBusy || busy || !renderPrompt.trim() || !hasDrawing"
+                    :disabled="renderBusy || busy || glbBusy
+                               || !renderPrompt.trim() || !hasDrawing"
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
@@ -303,7 +326,8 @@ export const StepSketch = {
           <img v-if="renderedImage" :src="renderedImage" alt="Rendered avatar"
                class="rendered-image">
 
-          <button class="primary" :disabled="!hasDrawing || busy || renderBusy"
+          <button class="primary"
+                  :disabled="!hasDrawing || busy || renderBusy || glbBusy"
                   @click="bringToLife">
             {{ busy ? 'Working…' : 'Bring it to life' }}
           </button>
@@ -313,6 +337,17 @@ export const StepSketch = {
           <div v-if="busy" class="progress">
             <div class="progress-bar" :style="{ width: percent + '%' }"></div>
             <span>{{ message }}</span>
+          </div>
+
+          <div class="sideload-row">
+            <span class="muted">Already have a rigged model?</span>
+            <label class="ghost file"
+                   :class="{ disabled: busy || renderBusy || glbBusy }">
+              {{ glbBusy ? 'Loading…' : 'Load GLB' }}
+              <input type="file" accept=".glb,model/gltf-binary"
+                     :disabled="busy || renderBusy || glbBusy"
+                     @change="loadGlb" hidden>
+            </label>
           </div>
           <p v-if="error" class="error">{{ error }}</p>
         </div>
