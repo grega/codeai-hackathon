@@ -165,9 +165,6 @@ export const StepSketch = {
       // A previous render belonged to the old drawing.
       renderedImage.value = null;
       renderError.value = null;
-      // Fire-and-forget: tracked on the shared store so it survives
-      // navigating on to "Teach" rather than blocking this step's caller.
-      generatePosedAvatar();
       return avatar;
     }
 
@@ -195,8 +192,10 @@ export const StepSketch = {
       renderError.value = null;
       renderProgress.value = 0;
       try {
-        const avatar = state.avatar || await createAvatarFromCanvas(
-          (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
+        // No progress callback here: this is rigging the avatar, not
+        // rendering it, so its (mock, staged) progress messages don't
+        // belong on the render progress bar — they'd just be confusing.
+        const avatar = state.avatar || await createAvatarFromCanvas();
         renderProgress.value = 0;
         const result = await api.renderAvatar(avatar.id, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
@@ -281,7 +280,9 @@ export const StepSketch = {
           <p class="muted" v-if="!hasDrawing && !state.avatar">Draw something
              on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
-             a Bedrock image model and shows what it renders.</p>
+             a Bedrock image model and shows what it renders. This also
+             starts posing a downloadable version in the background — it
+             needs a render to work from, so drawing alone isn't enough.</p>
 
           <div v-if="renderBusy" class="progress">
             <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>

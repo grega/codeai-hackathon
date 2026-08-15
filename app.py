@@ -170,7 +170,12 @@ def render_avatar(avatar_id: str):
 
     def work(progress):
         try:
-            result = bedrock.render_sketch(image_bytes, prompt)
+            # The T-pose transform prefers this render as its source (see
+            # tpose_avatar below), so it needs to hold full-body framing
+            # itself — a close-up here can't be recovered later.
+            result = bedrock.render_sketch(
+                image_bytes, f"{prompt}, {bedrock.FULL_BODY_HINT}",
+                negative_prompt=bedrock.FULL_BODY_NEGATIVE_HINT)
         except bedrock.BedrockError as exc:
             raise ProviderError(exc.message, detail=exc.detail) from exc
         # The player's actual designed look, not just the raw sketch — later
@@ -192,18 +197,23 @@ def tpose_avatar(avatar_id: str):
     PNG, via bedrock.tpose_transform. Fixed shape, no request body — always
     the same transform, so nothing to validate beyond the avatar existing.
 
-    Prefers the avatar's most recent /render output (what the player actually
-    designed) over the raw line drawing (plain black-on-white, no colour or
-    style), falling back to the sketch if nothing has been rendered yet."""
+    Always built from the avatar's most recent /render output, never the raw
+    line drawing: a plain black-on-white sketch gives Bedrock nothing to work
+    with for colour or style, and testing found no way to reliably recover a
+    good pose from it. Refuses if nothing has been rendered yet rather than
+    silently falling back to the sketch."""
     avatar = store.get_avatar(avatar_id)
     if not avatar or not avatar.image_path:
         return fail("That avatar doesn't exist.", 404)
+    if not avatar.rendered_image_bytes:
+        return fail("Render your avatar first — the posed version is built "
+                     "from that.", 400)
 
     refusal = tpose_limiter.check(request.remote_addr or "unknown")
     if refusal:
         return fail(refusal, 429)
 
-    image_bytes = avatar.rendered_image_bytes or Path(avatar.image_path).read_bytes()
+    image_bytes = avatar.rendered_image_bytes
 
     def work(progress):
         try:

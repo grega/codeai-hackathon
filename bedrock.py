@@ -211,6 +211,21 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
     }
 
 
+#: Without explicit "full body" language, Stability regularly crops in to a
+#: head-and-shoulders portrait — which then has no arms or legs left to put
+#: into a T-pose at all. Once that's happened there is no recovering it: a
+#: later pass asking for "full body" on an already-cropped image just
+#: redraws the same bust, because control_strength ties the output to the
+#: input's actual framing, not to what the prompt wishes the input looked
+#: like. So this has to hold at every stage that touches an avatar's image —
+#: the free-text render in app.py's render_avatar() included, since its
+#: output is what the T-pose transform below prefers as its source.
+FULL_BODY_HINT = (
+    "full body, entire figure visible from head to feet, wide full-length "
+    "shot, not a close-up, not a portrait, not cropped"
+)
+FULL_BODY_NEGATIVE_HINT = "close-up, portrait, headshot, bust, cropped, zoomed in"
+
 #: Fixed prompt for the T-pose transform — never caller-supplied, since this
 #: endpoint always wants the same thing: a clean, riggable reference pose.
 #:
@@ -220,19 +235,21 @@ def render_sketch(image_bytes: bytes, prompt: str, *,
 #: illustration style explicitly, and ruling out photorealism in the negative
 #: prompt, keeps the drawn character (hair, face, expression) recognisable.
 _TPOSE_PROMPT = (
-    "simple cartoon character illustration matching the input sketch, "
-    "flat colors, bold clean black outlines, children's drawing style, "
-    "standing in a T-pose with both arms held straight out to the sides, "
-    "standing perfectly upright, facing directly forward, symmetrical, "
-    "centered in frame, plain flat white background, no shadows"
+    f"{FULL_BODY_HINT}, cartoon character illustration matching the input "
+    "sketch, standing in a T-pose with both arms held straight out to the "
+    "sides at shoulder height, standing perfectly upright, facing directly "
+    "forward, symmetrical, centered in frame, flat colors, bold clean black "
+    "outlines, children's drawing style, plain flat white background, no "
+    "shadows"
 )
 _TPOSE_NEGATIVE_PROMPT = (
-    "photograph, photorealistic, realistic human skin, real person, "
-    "stock photo, fashion model, side view, back view, three-quarter view, "
-    "sitting, crouching, cropped, multiple characters, patterned "
-    "background, shadow, text, watermark, extra limbs, extra arms, "
-    "extra hands, four arms, duplicate limbs, deformed hands, "
-    "malformed hands, mutated, disfigured, bad anatomy, low quality, blurry"
+    f"{FULL_BODY_NEGATIVE_HINT}, photograph, photorealistic, realistic "
+    "human skin, real person, stock photo, fashion model, side view, back "
+    "view, three-quarter view, sitting, crouching, hands on hips, arms "
+    "down, multiple characters, patterned background, shadow, text, "
+    "watermark, extra limbs, extra arms, extra hands, four arms, duplicate "
+    "limbs, deformed hands, malformed hands, mutated, disfigured, bad "
+    "anatomy, low quality, blurry"
 )
 
 
@@ -243,10 +260,19 @@ def pose_to_tshape(image_bytes: bytes) -> dict:
     ``render_sketch`` against a separate, dedicated model id so it can be
     tuned independently of the free-text render feature even though both
     currently point at the same Stability service.
+
+    control_strength=0.15: Control Sketch locks onto the input image's own
+    pose (arms bent, hands on hips, whatever the render happened to be) at
+    anything above ~0.2, regardless of what the prompt asks for — measured by
+    sweeping 0.1-0.25 against a fixed test image, 3 seeds each. Below that
+    threshold the prompt's T-pose instruction reliably wins instead. Still
+    not guaranteed on every call — it's the low end of a probabilistic
+    threshold, not a hard switch — and character fidelity to the source
+    render trades off against it.
     """
     return render_sketch(
         image_bytes, _TPOSE_PROMPT,
-        control_strength=0.5,
+        control_strength=0.15,
         negative_prompt=_TPOSE_NEGATIVE_PROMPT,
         model_id=config.BEDROCK_TPOSE_MODEL_ID,
     )
