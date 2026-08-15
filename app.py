@@ -6,6 +6,7 @@ serialise the result — no domain logic lives here. See CONTRACT.md.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -137,7 +138,18 @@ def get_avatar_glb(avatar_id: str):
     avatar = store.get_avatar(avatar_id)
     if not avatar or not avatar.rig.glb_bytes:
         return fail("That avatar has no GLB — it's drawn procedurally.", 404)
-    return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary")
+    # Without validators a browser heuristically caches a 3MB binary and never
+    # asks again — so a swapped fixture keeps rendering the old body with no
+    # sign anything is stale. An ETag over the bytes plus no-cache means the
+    # browser always revalidates, but pays for the transfer only when the
+    # content actually differs (304 otherwise).
+    etag = hashlib.sha256(avatar.rig.glb_bytes).hexdigest()[:32]
+    if request.if_none_match.contains(etag):
+        return Response(status=304, headers={"ETag": f'"{etag}"',
+                                             "Cache-Control": "no-cache"})
+
+    return Response(avatar.rig.glb_bytes, mimetype="model/gltf-binary",
+                    headers={"ETag": f'"{etag}"', "Cache-Control": "no-cache"})
 
 
 # --------------------------------------------------------------------------

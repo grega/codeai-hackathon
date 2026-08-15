@@ -40,6 +40,11 @@ EPISODE_RATE = float(os.environ.get("EPISODE_RATE", "20"))
 #: Max upload size for a sketch.
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", 8 * 1024 * 1024))
 
+#: Path to a rigged GLB the mock rigger should serve instead of the procedural
+#: figure. Lets the whole GLB path be exercised before a real rigger exists:
+#:   MOCK_RIG_GLB=tests/fixtures/mixamo-style.glb flask --app app run
+MOCK_RIG_GLB = os.environ.get("MOCK_RIG_GLB", "").strip()
+
 #: How long a provider gets before the job runner gives up on it.
 PROVIDER_TIMEOUT = float(os.environ.get("PROVIDER_TIMEOUT", "120"))
 

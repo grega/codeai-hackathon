@@ -81,9 +81,65 @@ A single pose is a one-keyframe clip. Phases 2 and 3 use the same type.
 ```
 
 - `procedural` — browser builds the figure from the bone tree; no asset needed.
-- `glb` — browser loads a skinned mesh; bone names must match `schemas.BONES`.
+- `glb` — browser loads a skinned mesh.
 
 Both render through the same viewport path.
+
+### GLB requirements
+
+Verified against a synthetic fixture (`tests/fixtures/mixamo-style.glb`, 28KB,
+committed) **and** a real Meshy export. Point the mock rigger at any GLB to
+exercise the path:
+
+```bash
+MOCK_RIG_GLB=tests/fixtures/mixamo-style.glb flask --app app run
+```
+
+| Requirement | Why |
+|---|---|
+| **Bind in a T-pose** — arms out along ±X, legs down | A pose is defined as a rotation *away from bind*. An A-pose rig comes out with the arms wrong by the A/T difference. This is the one thing the browser cannot detect or correct. |
+| Bone names either `schemas.BONES` or Mixamo convention | Resolved by contract name first, then `MIXAMO_BONE_MAP` |
+| Any per-bone local axes | The browser reads each bone's bind rotation and retargets through world space, so `+Y`-down-the-limb rigs work unchanged |
+| Any scale/units | Normalised to ~1.55 units tall on load; centimetre exports are fine |
+| Baked animations | Ignored (no mixer is created). They'd fight the trainer for control of the bones |
+
+### Two traps, both of which load cleanly and then move wrongly
+
+**1. Mixamo's `LeftShoulder` is the clavicle.** The upper arm — what our
+`L_shoulder` means — is `LeftArm`.
+
+**2. The sides are mirrored, deliberately.** Our `L_*` bones sit at **−x**
+(screen-left). Mixamo's `Left` is the character's **anatomical** left, which is
+**+x** for a character facing +z — screen-right. So `L_*` maps to `Right*`.
+
+Get this backwards and nothing looks broken: bones resolve, the mesh renders,
+and then every arm raise drives the arm *downwards*, because a −90° z rotation
+lifts a limb lying along −x and lowers one lying along +x.
+
+We keep screen-relative sides because that is what the poses and rotation
+conventions above are written against, and because a child reads "the left one"
+as the one on the left of the screen. The cost: a pose meaning the character's
+anatomical left plays on its right — invisible for symmetric moves like waving,
+wrong for "raise your right hand".
+
+The mapping is in `schemas.MIXAMO_BONE_MAP` and ships to the browser on both
+`/api/schema` and every rig object.
+
+**Bone names arrive mangled, variously.** A bone authored as `mixamorig:LeftArm`
+has been seen as `mixamorigLeftArm` (three's `sanitizeNodeName` strips `:`),
+`mixamorig_LeftArm` (FBX conversion), and `mixamorig_LeftArm_011` (exporter
+index). The viewport normalises all of these; the real Meshy export tested was
+the last form.
+
+A Mixamo rig has ~65 bones to our 16. Unmapped bones (fingers, toes, Spine1/2)
+stay at bind — fine, though torso bends read as stiffer since our single `spine`
+drives only the first of three spine joints.
+
+**Proportions are still shared, not per-rig.** `rewards.py` scores `arm_height`
+and `symmetry` using `BONE_TREE` offsets, so a GLB with different limb lengths is
+scored against a differently-proportioned body than the one on screen. Poses
+themselves are rotation-only and unaffected. Fixing it means letting `Rig` carry
+its own offsets — worth doing once real rigs derive proportions from the drawing.
 
 ## Episode
 

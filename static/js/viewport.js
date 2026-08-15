@@ -11,12 +11,50 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { samplePose } from "./pose.js";
 
 const BODY_COLOUR = 0x6c5ce7;
 const GHOST_COLOUR = 0xb6c2e1;
 const HEAT_COLD = new THREE.Color(0x23c48a); // on target
 const HEAT_HOT = new THREE.Color(0xff6b6b);  // way off
+
+const IDENTITY = [0, 0, 0, 1];
+//: Rigs arrive at wildly different scales; normalise to roughly this height.
+const TARGET_HEIGHT = 1.55;
+//: Uniform arrays are fixed-size in GLSL, and reading past the end is
+//: undefined behaviour. A full Mixamo rig with fingers and helper bones runs
+//: to ~90, so leave real headroom AND clamp the index in the shader.
+const MAX_HEAT_BONES = 128;
+
+// Scratch quaternions — #applyPoseGlb runs 16 times a frame, twice over for
+// the two training viewports, so it allocates nothing.
+const _local = new THREE.Quaternion();
+const _desired = new THREE.Quaternion();
+const _parentWorld = new THREE.Quaternion();
+
+/**
+ * Reduce a bone name to something comparable across exporters.
+ *
+ * Real rigs reach us via several tools and each mangles names differently. A
+ * Mixamo bone authored as "mixamorig:LeftArm" has been seen arriving as:
+ *
+ *   mixamorig:LeftArm       authored
+ *   mixamorigLeftArm        three's PropertyBinding.sanitizeNodeName strips ":"
+ *   mixamorig_LeftArm       FBX conversion swaps ":" for "_"
+ *   mixamorig_LeftArm_011   ...plus a uniquifying index from the exporter
+ *
+ * So: drop one trailing _<digits> index, then drop every separator, then
+ * lowercase. The index is removed in a SINGLE pass on purpose — stripping all
+ * trailing digits would fold "Spine_02" and "Spine1_03" onto the same key and
+ * the wrong bone could win.
+ */
+function normaliseBoneName(name) {
+  return (name || "")
+    .replace(/_\d+$/, "")
+    .replace(/[\s.:/[\]_-]/g, "")
+    .toLowerCase();
+}
 
 export class Viewport {
   constructor(canvas, { ghost = false } = {}) {
@@ -93,6 +131,13 @@ export class Viewport {
     this.limbs = {};
     this.ghostBones = {};
     this.boneTree = rig.bone_tree;
+    // Stale bind data would silently retarget the next rig against the last
+    // one's skeleton, so clear every GLB-specific field up front.
+    this.bindWorld = null;
+    this.ghostBindWorld = null;
+    this.glbGroup = null;
+    this.skinned = [];
+    this._reverseBones = null;
 
     if (rig.format === "glb" && rig.glb_url) {
       await this.#loadGlb(rig);
@@ -104,31 +149,149 @@ export class Viewport {
     }
 
     if (this.ghostEnabled) {
-      const built = this.#buildProcedural(rig.bone_tree, GHOST_COLOUR, 0.22);
-      this.ghostBones = built.bones;
-      this.ghostGroup = built.group;
+      if (this.glbGroup) this.#buildGlbGhost();
+      else {
+        const built = this.#buildProcedural(rig.bone_tree, GHOST_COLOUR, 0.22);
+        this.ghostBones = built.bones;
+        this.ghostGroup = built.group;
+      }
       this.ghostGroup.visible = false;
       this.root.add(this.ghostGroup);
     }
   }
 
-  async #loadGlb(rig) {
-    // Untested against a real asset — no rigger produces GLBs yet. The bone
-    // lookup below is the whole integration: a GLB whose bone names match
-    // schemas.BONES will pose correctly through the same applyPose() calls.
-    const gltf = await new GLTFLoader().loadAsync(rig.glb_url);
-    const group = gltf.scene;
-    group.traverse((node) => {
-      if (node.isBone || node.isObject3D) {
-        if (rig.skeleton.includes(node.name)) this.bones[node.name] = node;
+  /**
+   * Translucent copy of a GLB rig.
+   *
+   * SkeletonUtils.clone(), not group.clone() — a plain clone of a SkinnedMesh
+   * keeps a reference to the ORIGINAL skeleton, so the ghost and the figure
+   * would move as one and the comparison would show nothing.
+   */
+  #buildGlbGhost() {
+    const ghost = cloneSkinned(this.glbGroup);
+    ghost.traverse((node) => {
+      if (node.isMesh) {
+        node.material = node.material.clone();
+        node.material.onBeforeCompile = undefined;   // no heat tint on the ghost
+        node.material.transparent = true;
+        node.material.opacity = 0.22;
+        node.material.depthWrite = false;
+        node.material.color = new THREE.Color(GHOST_COLOUR);
       }
     });
-    this.root.add(group);
+
+    this.ghostBones = {};
+    const byName = new Map();
+    ghost.traverse((n) => byName.set(n.name, n));
+    for (const [bone, node] of Object.entries(this.bones)) {
+      const twin = byName.get(node.name);
+      if (twin) this.ghostBones[bone] = twin;
+    }
+
+    ghost.updateMatrixWorld(true);
+    this.ghostBindWorld = {};
+    for (const [bone, node] of Object.entries(this.ghostBones)) {
+      this.ghostBindWorld[bone] = node.getWorldQuaternion(new THREE.Quaternion());
+    }
+    this.ghostGroup = ghost;
+  }
+
+  /**
+   * Load a rigged GLB (Meshy output is Mixamo-convention).
+   *
+   * Two problems to solve, and neither is the posing itself — setting
+   * `bone.quaternion` drives a skinned mesh exactly as it drives the
+   * procedural figure.
+   *
+   * 1. NAMES. A Mixamo rig calls our `L_shoulder` "mixamorig:LeftArm", so
+   *    bones are resolved by contract name first, then via the alias map the
+   *    server sends. Unmapped bones (fingers, toes, Spine1/2) stay at bind.
+   *
+   * 2. BONE FRAMES. Each GLB bone's local axes are whatever the exporter
+   *    produced — typically +Y down the limb, not axis-aligned like ours. So
+   *    a contract quaternion cannot be written to a GLB bone directly. We
+   *    capture each bone's BIND world rotation at load, then retarget through
+   *    world space every frame (see #applyPoseGlb).
+   *
+   * This works without per-bone correction constants only because both
+   * skeletons bind in a T-pose. An A-pose rig would need an extra term.
+   */
+  async #loadGlb(rig) {
+    const gltf = await new GLTFLoader().loadAsync(rig.glb_url);
+    const group = gltf.scene;
+
+    // A baked idle animation would fight applyPose for control of the bones.
+    // We never create a mixer, so clips simply go unplayed — but say so, since
+    // silently dropping an animation the rigger exported is confusing.
+    if (gltf.animations?.length) {
+      console.info(`[viewport] ignoring ${gltf.animations.length} baked ` +
+                   `animation(s); poses are driven by the trainer`);
+    }
+
+    const alias = rig.bone_aliases?.mixamo || {};
+    const byName = new Map();
+    group.traverse((node) => {
+      byName.set(node.name, node);
+      // GLTFLoader runs every node name through PropertyBinding.sanitizeNodeName,
+      // which STRIPS ". : / [ ]" — so a rig authored with "mixamorig:LeftArm"
+      // arrives as "mixamorigLeftArm" and an exact lookup finds nothing. Index
+      // a normalised form too, and match case-insensitively while we're here,
+      // since exporters vary on capitalisation.
+      const key = normaliseBoneName(node.name);
+      if (key && !byName.has(key)) byName.set(key, node);
+    });
+
+    const find = (name) =>
+      name ? (byName.get(name) || byName.get(normaliseBoneName(name))) : undefined;
+
+    for (const bone of rig.skeleton) {
+      const node = find(bone) || find(alias[bone]);
+      if (node) this.bones[bone] = node;
+    }
 
     const missing = rig.skeleton.filter((b) => !this.bones[b]);
     if (missing.length) {
-      console.warn("[viewport] GLB is missing contract bones:", missing);
+      const present = [];
+      group.traverse((n) => { if (n.isBone) present.push(n.name); });
+      console.warn("[viewport] GLB has no bone for:", missing,
+                   "— those joints will not move. Bones in the file:", present);
     }
+
+    // Bind rotations must be read before anything poses the rig.
+    group.updateMatrixWorld(true);
+    this.bindWorld = {};
+    for (const [bone, node] of Object.entries(this.bones)) {
+      this.bindWorld[bone] = node.getWorldQuaternion(new THREE.Quaternion());
+    }
+
+    this.#normaliseScale(group);
+    this.#prepareSkinnedHeat(group);
+    this.root.add(group);
+    this.glbGroup = group;
+  }
+
+  /**
+   * Scale the rig to roughly the height the camera is framed for.
+   *
+   * Rigs in the Mixamo lineage are often exported in centimetres, so a 1.7m
+   * character arrives 170 units tall and fills the screen with a kneecap.
+   */
+  #normaliseScale(group) {
+    const box = new THREE.Box3().setFromObject(group);
+    const height = box.max.y - box.min.y;
+    if (!Number.isFinite(height) || height <= 0) return;
+
+    const scale = TARGET_HEIGHT / height;
+    if (Math.abs(scale - 1) > 0.02) {
+      group.scale.setScalar(scale);
+      console.info(`[viewport] rig was ${height.toFixed(2)} units tall, ` +
+                   `scaled by ${scale.toFixed(3)}`);
+    }
+    // Stand it on the ground plane. root is lifted for the procedural figure,
+    // so undo that here rather than assuming both rigs share an origin.
+    group.updateMatrixWorld(true);
+    const grounded = new THREE.Box3().setFromObject(group);
+    group.position.y -= grounded.min.y + this.root.position.y;
   }
 
   /**
@@ -204,16 +367,116 @@ export class Viewport {
   /** Apply a pose (bone name -> quaternion) to the main figure. */
   applyPose(pose, target = this.bones) {
     if (!pose) return;
+    if (this.bindWorld && target === this.bones) {
+      this.#applyPoseGlb(pose, this.bones, this.bindWorld);
+      return;
+    }
     for (const [bone, q] of Object.entries(pose)) {
       target[bone]?.quaternion.set(q[0], q[1], q[2], q[3]);
     }
+  }
+
+  /**
+   * Retarget a contract pose onto a GLB skeleton, through world space.
+   *
+   * A contract pose is a local rotation per bone in OUR frame, where every
+   * bone binds at identity. The same rotation written straight to a GLB bone
+   * would be interpreted in that bone's own frame — usually +Y down the limb —
+   * and produce a knot. So:
+   *
+   *   1. forward-kinematics our pose to a world rotation per bone. Because our
+   *      bind is identity, that world rotation IS the delta from bind.
+   *   2. apply that delta to the GLB bone's captured bind world rotation.
+   *   3. convert back to the GLB bone's local frame, against its parent.
+   *
+   * Parents are handled before children (BONE_TREE is ordered that way) so a
+   * parent's world matrix is current by the time a child reads it.
+   */
+  #applyPoseGlb(pose, bones, bindWorld) {
+    const worldDelta = {};
+
+    for (const [name, { parent }] of Object.entries(this.boneTree)) {
+      const q = pose[name] || IDENTITY;
+      _local.set(q[0], q[1], q[2], q[3]);
+      worldDelta[name] = parent
+        ? worldDelta[parent].clone().multiply(_local)
+        : _local.clone();
+
+      const node = bones[name];
+      if (!node) continue;
+
+      // World-space rotations pre-multiply: delta THEN the bind orientation.
+      _desired.copy(worldDelta[name]).multiply(bindWorld[name]);
+
+      if (node.parent) {
+        node.parent.updateWorldMatrix(true, false);
+        node.parent.getWorldQuaternion(_parentWorld);
+        node.quaternion.copy(_parentWorld.invert()).multiply(_desired);
+      } else {
+        node.quaternion.copy(_desired);
+      }
+    }
+  }
+
+  /**
+   * Give a skinned mesh a per-bone tint uniform.
+   *
+   * The procedural figure colours joints by swapping each limb's material,
+   * which a skinned mesh cannot do — it is one mesh with one material. Instead
+   * inject a per-bone colour array and have the fragment shader blend it using
+   * the vertex's own skin weights, so the tint follows the deformation.
+   */
+  #prepareSkinnedHeat(group) {
+    this.skinned = [];
+
+    group.traverse((node) => {
+      if (!node.isSkinnedMesh) return;
+      // Each mesh gets its OWN tint array. A character export is often several
+      // skinned meshes (body, hair, clothes), and they do not have to share a
+      // skeleton — one shared array would have them overwriting each other.
+      const uniform = { value: Array.from({ length: MAX_HEAT_BONES },
+                                          () => new THREE.Color(1, 1, 1)) };
+      node.userData.heatUniform = uniform;
+      this.skinned.push(node);
+      node.material = node.material.clone();
+      node.material.onBeforeCompile = (shader) => {
+        shader.uniforms.boneTint = uniform;
+        shader.vertexShader = shader.vertexShader
+          .replace("#include <common>",
+            `#include <common>
+             uniform vec3 boneTint[${MAX_HEAT_BONES}];
+             varying vec3 vBoneTint;`)
+          .replace("#include <skinning_vertex>",
+            `#include <skinning_vertex>
+             int bi0 = int(clamp(skinIndex.x, 0.0, float(${MAX_HEAT_BONES - 1})));
+             int bi1 = int(clamp(skinIndex.y, 0.0, float(${MAX_HEAT_BONES - 1})));
+             int bi2 = int(clamp(skinIndex.z, 0.0, float(${MAX_HEAT_BONES - 1})));
+             int bi3 = int(clamp(skinIndex.w, 0.0, float(${MAX_HEAT_BONES - 1})));
+             vBoneTint =
+               boneTint[bi0] * skinWeight.x +
+               boneTint[bi1] * skinWeight.y +
+               boneTint[bi2] * skinWeight.z +
+               boneTint[bi3] * skinWeight.w;`);
+        shader.fragmentShader = shader.fragmentShader
+          .replace("#include <common>",
+            "#include <common>\nvarying vec3 vBoneTint;")
+          .replace("#include <color_fragment>",
+            "#include <color_fragment>\ndiffuseColor.rgb *= vBoneTint;");
+      };
+      node.material.needsUpdate = true;
+    });
   }
 
   /** Show a translucent copy of a pose behind the figure, for comparison. */
   setGhostPose(pose) {
     if (!this.ghostGroup) return;
     this.ghostGroup.visible = Boolean(pose);
-    if (pose) this.applyPose(pose, this.ghostBones);
+    if (!pose) return;
+    if (this.ghostBindWorld) {
+      this.#applyPoseGlb(pose, this.ghostBones, this.ghostBindWorld);
+    } else {
+      this.applyPose(pose, this.ghostBones);
+    }
   }
 
   showGhost(visible) {
@@ -242,6 +505,7 @@ export class Viewport {
    */
   setJointHeat(perJointError) {
     if (!perJointError) return;
+    if (this.skinned?.length) { this.#setSkinnedHeat(perJointError); return; }
     for (const bone of Object.keys(this.limbs)) {
       // Only the articulated bones are scored, but leaving hands and feet at
       // the default blue reads as a third state the legend never explains. Let
@@ -264,7 +528,49 @@ export class Viewport {
     return undefined;
   }
 
+  /**
+   * Fill the per-bone tint array the shader reads.
+   *
+   * Indices are the skeleton's own bone order, not our contract order, so each
+   * GLB bone has to be looked up by identity. Bones we do not score inherit
+   * their nearest scored ancestor, as in the procedural path.
+   */
+  #setSkinnedHeat(perJointError) {
+    for (const mesh of this.skinned) {
+      const tints = mesh.userData.heatUniform.value;
+      const list = mesh.skeleton.bones;
+      for (let i = 0; i < list.length && i < MAX_HEAT_BONES; i++) {
+        const contractName = this.#contractNameOf(list[i]);
+        const error = contractName
+          ? this.#inheritedError(contractName, perJointError) : undefined;
+        if (error === undefined) { tints[i].setRGB(1, 1, 1); continue; }
+        tints[i].copy(HEAT_COLD).lerp(HEAT_HOT,
+          Math.min(1, Math.max(0, error * 2.5)));
+      }
+    }
+  }
+
+  /** Which contract bone, if any, a GLB node corresponds to. */
+  #contractNameOf(node) {
+    if (!this._reverseBones) {
+      this._reverseBones = new Map(
+        Object.entries(this.bones).map(([name, n]) => [n, name]));
+    }
+    // Walk up: a Mixamo Spine2 is unmapped, but sits under our `spine`.
+    for (let n = node; n; n = n.parent) {
+      const hit = this._reverseBones.get(n);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
   clearJointHeat() {
+    if (this.skinned?.length) {
+      for (const mesh of this.skinned) {
+        for (const tint of mesh.userData.heatUniform.value) tint.setRGB(1, 1, 1);
+      }
+      return;
+    }
     for (const meshes of Object.values(this.limbs)) {
       for (const mesh of meshes) mesh.material.color.setHex(BODY_COLOUR);
     }
