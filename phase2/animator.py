@@ -16,7 +16,7 @@ import numpy as np
 
 import llm_animator
 import quat
-from gltf_utils import GLTF2, Joint, find_joint, local_rotation_for_world_delta
+from gltf_utils import GLTF2, Joint, extract_pose, find_joint, local_rotation_for_world_delta
 
 FPS = 30
 
@@ -119,3 +119,78 @@ def generate(
     raise ValueError(
         f"no procedural generator matches prompt {prompt!r}; known keywords: {list(GENERATORS)}"
     )
+
+
+_POSE_EPSILON_DEGREES = 2.0
+
+
+def _moved_joints(
+    pose_a: dict[str, np.ndarray],
+    pose_b: dict[str, np.ndarray],
+    epsilon_degrees: float = _POSE_EPSILON_DEGREES,
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """Joints present in both poses whose rotation differs by more than
+    `epsilon_degrees` -- drops floating-point/re-export noise (observed ~1.2 degrees
+    on untouched joints between rigged_human.glb and frame_1.glb) while keeping real
+    motion (observed ~23-51 degrees on the shoulders/arms in that pair)."""
+    result = {}
+    for name, start_q in pose_a.items():
+        end_q = pose_b.get(name)
+        if end_q is None:
+            continue
+        if quat.angle_between(start_q, end_q) > epsilon_degrees:
+            result[name] = (start_q, end_q)
+    return result
+
+
+def _smoothstep(u: float) -> float:
+    return u * u * (3.0 - 2.0 * u)
+
+
+def _transition_fallback(
+    start_pose: dict[str, np.ndarray],
+    end_pose: dict[str, np.ndarray],
+    duration: float = 2.0,
+) -> dict[str, tuple[list[float], list[np.ndarray]]]:
+    """Deterministic no-LLM baseline: every moved joint slerps start->end pose on the
+    same smoothstep-eased timeline. Rig-agnostic -- operates on whatever joint names
+    are in start_pose/end_pose, unlike generate_wave/generate_spin's hardcoded names."""
+    times = _keyframe_times(duration)
+    tracks = {}
+    for name, start_q in start_pose.items():
+        end_q = end_pose[name]
+        quats = [quat.slerp(start_q, end_q, _smoothstep(t / duration)) for t in times]
+        tracks[name] = (times, quats)
+    return tracks
+
+
+def generate_transition(
+    joints_a: list[Joint],
+    joints_b: list[Joint],
+    duration: float = 2.0,
+    style_prompt: str | None = None,
+    use_llm: bool = True,
+) -> tuple[str, dict[int, tuple[list[float], list[np.ndarray]]]]:
+    pose_a = extract_pose(joints_a)
+    pose_b = extract_pose(joints_b)
+    moved = _moved_joints(pose_a, pose_b)
+    if not moved:
+        raise ValueError(
+            "pose-b matches pose-a (within 2 degrees) on every non-leaf joint -- nothing to animate"
+        )
+    start_pose = {name: s for name, (s, _e) in moved.items()}
+    end_pose = {name: e for name, (_s, e) in moved.items()}
+
+    tracks_by_name = None
+    if use_llm:
+        try:
+            tracks_by_name = llm_animator.generate_transition(start_pose, end_pose, duration, style_prompt)
+        except Exception as e:
+            print(f"[animator] LLM transition generation failed, falling back to slerp baseline: {e}")
+
+    if tracks_by_name is None:
+        tracks_by_name = _transition_fallback(start_pose, end_pose, duration)
+
+    by_name = {j.name: j.node_index for j in joints_a}
+    tracks = {by_name[name]: value for name, value in tracks_by_name.items() if name in by_name}
+    return "pose_transition", tracks

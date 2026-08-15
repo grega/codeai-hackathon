@@ -51,4 +51,28 @@ def combine(*deltas: np.ndarray) -> np.ndarray:
     return result
 
 
+def angle_between(q1: np.ndarray, q2: np.ndarray) -> float:
+    """Angle in degrees between two rotations, shortest-path (abs(dot) handles the
+    double-cover sign ambiguity -- q and -q represent the same rotation)."""
+    q1, q2 = normalize(q1), normalize(q2)
+    dot = np.clip(abs(np.dot(q1, q2)), -1.0, 1.0)
+    return float(np.degrees(2.0 * np.arccos(dot)))
+
+
+def slerp(q1: np.ndarray, q2: np.ndarray, t: float) -> np.ndarray:
+    """Spherical linear interpolation, shortest path. t=0 -> q1, t=1 -> q2 exactly."""
+    q1, q2 = normalize(q1), normalize(q2)
+    dot = float(np.dot(q1, q2))
+    if dot < 0.0:  # antipodal quats are the same rotation; flip to take the short way
+        q2, dot = -q2, -dot
+    dot = min(dot, 1.0)
+    if dot > 0.9995:  # nearly identical: sin-ratio formula divides by ~sin(0), unstable
+        return normalize(q1 + t * (q2 - q1))
+    theta_0 = np.arccos(dot)
+    sin_theta_0 = np.sin(theta_0)
+    a = np.sin((1.0 - t) * theta_0) / sin_theta_0
+    b = np.sin(t * theta_0) / sin_theta_0
+    return a * q1 + b * q2
+
+
 IDENTITY = np.array([0.0, 0.0, 0.0, 1.0])

@@ -26,9 +26,19 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_MODEL = "anthropic/claude-sonnet-5"
 
 
-def build(prompt: str, input_path: str, output_path: str, use_llm: bool = True) -> str:
+def build(
+    prompt: str | None,
+    input_path: str,
+    output_path: str,
+    use_llm: bool = True,
+    pose_b_path: str | None = None,
+) -> str:
     gltf, joints = gltf_utils.load_skeleton(input_path)
-    name, tracks = animator.generate(prompt, gltf, joints, use_llm=use_llm)
+    if pose_b_path is not None:
+        _gltf_b, joints_b = gltf_utils.load_skeleton(pose_b_path)
+        name, tracks = animator.generate_transition(joints, joints_b, style_prompt=prompt, use_llm=use_llm)
+    else:
+        name, tracks = animator.generate(prompt, gltf, joints, use_llm=use_llm)
     gltf_utils.add_rotation_animation(gltf, tracks, name=name)
     gltf_utils.save(gltf, output_path)
     return name
@@ -46,10 +56,19 @@ def main() -> None:
     load_dotenv()  # picks up OPENROUTER_API_KEY from ../.env (searches upward from this file)
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("prompt", help='e.g. "wave arms in air" or "spin around in a circle"')
-    parser.add_argument("--input", default="rigged_human.glb")
+    parser.add_argument(
+        "prompt", nargs="?", default=None,
+        help='e.g. "wave arms in air", or style guidance like "make it snappy" when --pose-b '
+             "is given (optional in that case; required otherwise)",
+    )
+    parser.add_argument("--input", default="rigged_human.glb", help="base/start pose GLB")
+    parser.add_argument(
+        "--pose-b", default=None,
+        help="desired end-pose GLB; switches to pose-to-pose transition mode "
+             "(prompt becomes optional style guidance)",
+    )
     parser.add_argument("--output", default="out.glb", help="filename written inside output/")
-    parser.add_argument("--no-llm", action="store_true", help="skip the LLM, use hardcoded wave/spin only")
+    parser.add_argument("--no-llm", action="store_true", help="skip the LLM, use hardcoded/deterministic fallback only")
     parser.add_argument(
         "--openrouter", action="store_true",
         help=f"use {OPENROUTER_MODEL} via OpenRouter instead of a local MLX server (needs OPENROUTER_API_KEY)",
@@ -57,6 +76,12 @@ def main() -> None:
     parser.add_argument("--model", default=None, help="model name as the server/provider expects it")
     parser.add_argument("--base-url", default=None, help="OpenAI-compatible endpoint URL")
     args = parser.parse_args()
+
+    if not args.prompt and not args.pose_b:
+        sys.exit(
+            "Error: provide a prompt, --pose-b, or both (prompt describes the motion; "
+            "--pose-b gives a target pose GLB to transition into, with prompt as optional style guidance)"
+        )
 
     if args.openrouter:
         llm_client.DEFAULT_MODEL = args.model or OPENROUTER_MODEL
@@ -75,15 +100,17 @@ def main() -> None:
 
     base_url = server.serve_directory(directory)  # started up front, serves both status.html and viewer.html
 
+    display_label = args.prompt or (f"pose transition ({os.path.basename(args.pose_b)})" if args.pose_b else "")
+
     window = webview.create_window(
-        f"Animation preview: {args.prompt}",
-        _status_url(base_url, prompt=args.prompt),
+        f"Animation preview: {display_label}",
+        _status_url(base_url, prompt=display_label),
         width=900, height=700,
     )
 
     def _generate_then_load(window: webview.Window) -> None:
         try:
-            anim_name = build(args.prompt, args.input, output_path, use_llm=not args.no_llm)
+            anim_name = build(args.prompt, args.input, output_path, use_llm=not args.no_llm, pose_b_path=args.pose_b)
         except Exception as e:
             print(f"Error: {e}", file=sys.stderr)
             window.load_url(_status_url(base_url, error=str(e)))

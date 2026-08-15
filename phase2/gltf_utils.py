@@ -53,6 +53,23 @@ def load_skeleton(path: str) -> tuple[GLTF2, list[Joint]]:
     return gltf, joints
 
 
+def extract_pose(joints: list[Joint]) -> dict[str, np.ndarray]:
+    """Every non-leaf joint's rest rotation, keyed by name (node indices aren't
+    stable across two GLBs of the "same" rig -- verified empirically). Leaf joints
+    (no children) are excluded: on this rig they're twist/corrective/fingertip-distal/
+    toe-end bones, and reading a pose back out of an authored file's rest rotations
+    picks up large, spurious deltas on exactly these joints (12 leaf joints with >2
+    degree deltas between rigged_human.glb/frame_1.glb, none corroborated by parent
+    motion, vs. 4 real deltas of 23-51 degrees on the shoulders/arms). Rig-agnostic
+    proxy for "not a meaningful animation target", not a Mixamo-specific name list.
+
+    Note: does not read a baked Animation, only the rest pose -- correct for a pose-B
+    file authored as a static rest-pose export (verified for frame_1.glb), but a
+    future pose-B file with its own baked clip would have that clip silently ignored.
+    """
+    return {j.name: j.rest_rotation for j in joints if j.children}
+
+
 _TRAILING_NUMBER = re.compile(r"_\d+$")
 
 
