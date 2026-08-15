@@ -138,7 +138,7 @@ slug.
 | `PROVIDER_TRAINING` | `mock` | `mock` or `real` |
 | `RIGGING_SERVICE_URL` | — | supplied ngrok HTTPS base URL; server-side only |
 | `RIGGING_SERVICE_TIMEOUT` | `300` | overall real-rigging deadline in seconds |
-| `RIGGING_POLL_INTERVAL` | `2` | seconds between mesh/rig status checks |
+| `RIGGING_POLL_INTERVAL` | `5` | seconds between mesh/rig status checks |
 | `EPISODE_RATE` | `20` | episodes/sec at speed 1; higher means more work per trainee |
 | `DATA_DIR` | `./data` | upload location |
 | `MAX_UPLOAD_BYTES` | `8388608` | 8MB |

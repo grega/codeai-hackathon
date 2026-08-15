@@ -43,7 +43,7 @@ RIGGING_SERVICE_TIMEOUT = float(
 
 #: Delay between remote mesh/rig task status checks.
 RIGGING_POLL_INTERVAL = float(
-    os.environ.get("RIGGING_POLL_INTERVAL", "2"))
+    os.environ.get("RIGGING_POLL_INTERVAL", "5"))
 
 #: Episodes per second pushed to the browser at speed 1.0. The training screen
 #: multiplies this by its speed control.
@@ -102,11 +102,11 @@ LLM_RATE_PER_DAY = int(os.environ.get("LLM_RATE_PER_DAY", "500"))
 
 
 # --------------------------------------------------------------------------
-# Sketch-render feature (POST /api/avatars/<id>/render)
+# Sketch-render feature (POST /api/renders)
 # --------------------------------------------------------------------------
 # A purpose-built, browser-facing endpoint — unlike the prompt endpoint above,
-# the frontend is meant to call this one. It takes a fixed shape (an avatar's
-# saved drawing plus a short prompt) and always invokes the same model, so
+# the frontend is meant to call this one. It takes a fixed shape (an uploaded
+# drawing plus a short prompt) and always invokes the same model, so
 # there's no caller-selectable model_id and therefore no allowlist. It still
 # shares BEDROCK_REGION/AWS credentials and fails closed the same way: no
 # region configured means bedrock._get_client() refuses before anything runs.

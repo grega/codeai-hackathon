@@ -24,10 +24,12 @@ _JSON_CHUNK = b"JSON"
 _MAX_JSON_BYTES = 2 * 1024 * 1024
 _MAX_GLB_BYTES = 100 * 1024 * 1024
 _PENDING_STATUSES = {
-    "accepted", "created", "downloading", "in_progress", "meshy", "pending",
-    "processing", "queued", "rigging", "running", "started", "uploading",
+    "accepted", "created", "decimating", "downloading", "finalizing",
+    "in_progress", "inferring_skeleton", "injecting_keyframes", "meshy",
+    "pending", "processing", "queued", "rigging", "rigging_blender", "running",
+    "started", "uploading", "visualizing",
 }
-_SUCCESS_STATUSES = {"complete", "completed", "done", "success", "succeeded"}
+_SUCCESS_STATUSES = {"complete", "completed", "done", "ok", "success", "succeeded"}
 _FAILED_STATUSES = {"cancelled", "canceled", "error", "failed", "failure"}
 _HUMANOID_LABELS = {"biped", "human", "humanoid", "person"}
 

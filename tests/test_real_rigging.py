@@ -225,13 +225,20 @@ def test_async_mesh_and_rig_tasks_are_polled():
         ("/mesh?classify_id=drawing%2F1",
          {"status": "queued", "task_id": "mesh 1"}),
         ("/mesh/status/mesh%201", {"status": "meshy", "progress": 10}),
+        ("/mesh/status/mesh%201", {"status": "decimating", "progress": 85}),
         ("/mesh/status/mesh%201", {"status": "done",
                             "result": {"url": "/files/mesh.glb"}}),
         ("/infer_joints?classify_id=drawing%2F1",
          {"result": {"joints": {"hips": [0, 0, 0]}}}),
         ("/rig?classify_id=drawing%2F1",
          {"state": "accepted", "job_id": "rig-1"}),
-        ("/rig/status/rig-1", {"state": "rigging", "progress": 50}),
+        ("/rig/status/rig-1", {"state": "rigging", "progress": 10}),
+        ("/rig/status/rig-1", {"state": "decimating", "progress": 20}),
+        ("/rig/status/rig-1", {"state": "inferring_skeleton", "progress": 30}),
+        ("/rig/status/rig-1", {"state": "injecting_keyframes", "progress": 40}),
+        ("/rig/status/rig-1", {"state": "visualizing", "progress": 50}),
+        ("/rig/status/rig-1", {"state": "rigging_blender", "progress": 60}),
+        ("/rig/status/rig-1", {"state": "finalizing", "progress": 90}),
         ("/rig/status/rig-1", {"state": "succeeded",
                         "result": {"download_url": "/files/avatar.glb"}}),
         ("/files/avatar.glb", make_glb()),
@@ -241,7 +248,7 @@ def test_async_mesh_and_rig_tasks_are_polled():
     rig = rigger.rig(b"png", "image/png", lambda f, m: seen.append((f, m)))
 
     assert rig.glb_bytes
-    assert sum(request.method == "GET" for request in opener.requests) == 6
+    assert sum(request.method == "GET" for request in opener.requests) == 13
     assert any(0.16 < fraction <= 0.50 for fraction, _ in seen)
     assert any(0.70 < fraction <= 0.90 for fraction, _ in seen)
 
