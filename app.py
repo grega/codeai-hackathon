@@ -15,9 +15,11 @@ from flask import Flask, Response, jsonify, request, send_file, send_from_direct
 
 import bedrock
 import config
+import export
 import providers
 from auth import RateLimiter, limiter, require_token
 from jobs import runner
+from logs import log
 from rewards import TERM_LABELS
 from schemas import (
     Clip,
@@ -305,6 +307,58 @@ def get_run(run_id: str):
     if not run:
         return fail("That training run doesn't exist.", 404)
     return jsonify(run.to_json())
+
+
+# --------------------------------------------------------------------------
+# Training output
+#
+# What a finished run produces, for whatever comes next. Two artifacts because
+# they have different audiences: the GLB is for rendering and 3D tools, the
+# JSON is for the animation step. See export.py — in particular, do not hand
+# the GLB to a language model.
+# --------------------------------------------------------------------------
+
+def _export_inputs(run_id: str):
+    """Resolve a run to (run, avatar, clip), or raise ExportError."""
+    run = store.get_run(run_id)
+    if not run:
+        raise export.ExportError("That training run doesn't exist.", 404)
+    avatar = store.get_avatar(run.avatar_id)
+    if not avatar:
+        raise export.ExportError("That avatar is no longer around.", 404,
+                                 "avatar evicted from the in-memory store")
+    return run, avatar, run.target_clip
+
+
+@app.get("/api/training/runs/<run_id>/export.glb")
+def export_run_glb(run_id: str):
+    """The learned pose, baked into the avatar's own model."""
+    try:
+        run, avatar, clip = _export_inputs(run_id)
+        data, _ = export.build_glb(run, avatar, clip)
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[export] {run_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+
+    name = f"{clip.name.replace(' ', '-').lower()}-{run_id}.glb"
+    return Response(data, mimetype="model/gltf-binary", headers={
+        "Content-Disposition": f'attachment; filename="{name}"',
+        "Cache-Control": "no-cache",
+    })
+
+
+@app.get("/api/training/runs/<run_id>/export.json")
+def export_run_json(run_id: str):
+    """Bones, start pose, end pose, provenance — the animation step's input."""
+    try:
+        run, avatar, clip = _export_inputs(run_id)
+        document = export.build_document(run, avatar, clip)
+    except export.ExportError as exc:
+        if exc.detail:
+            log(f"[export] {run_id}: {exc.detail}")
+        return fail(exc.user_message, exc.status)
+    return jsonify(document)
 
 
 @app.get("/api/training/runs/<run_id>/events")

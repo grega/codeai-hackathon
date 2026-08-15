@@ -162,6 +162,93 @@ One per training episode, streamed over SSE.
 `reward` and `match` differ whenever the weights reward something other than
 copying the target.
 
+## Training output
+
+A finished run exports two artifacts. They have different audiences, and the
+split matters — see the warning below.
+
+| Endpoint | What it is | For |
+|---|---|---|
+| `GET /api/training/runs/<id>/export.glb` | The avatar's own model, node rotations baked to the learned end pose, with everything below embedded in `asset.extras.avatarTrainer` | Rendering, 3D tools, humans |
+| `GET /api/training/runs/<id>/export.json` | Bones, start pose, end pose, provenance. Nothing else | The animation step |
+
+Built by `export.py`; GLB surgery and the server-side retarget live in
+`gltf.py`. GLB-format rigs only — a procedural avatar returns 409 with
+"there's no model to export".
+
+### The two poses
+
+**Start is the T-pose**: every bone at identity. That is our rest pose *and* the
+GLB's bind pose, so both skeletons agree at frame zero of any animation. It
+needs no baking — it is the file's natural state.
+
+**End is what the learner reached** — the last episode's pose. The hill-climber
+only accepts improvements, so the last pose is also the best one; taking it from
+the end of history means a run stopped early still exports what was on screen.
+
+A GLB can hold only one static pose in its node rotations, so the file *is* the
+end state and the start pose rides in `extras`.
+
+### The document
+
+```json
+{
+  "schema_version": 1,
+  "run_id": "run_…", "avatar_id": "av_…",
+  "skeleton": { "bones": [...], "articulated": [...],
+                "hierarchy": {...}, "rest_offsets": {...},
+                "pose_format": "bone name -> local rotation relative to rest, quaternion [x, y, z, w]" },
+  "poses":   { "start": { "hips": [0,0,0,1], ... },
+               "end":   { "hips": [0,0,0,1], "L_shoulder": [...], ... } },
+  "target":  { "name": "Arms in the air", "prompt": "waves arms in the air" },
+  "training": { "episodes_run": 200, "best_reward": 0.9, "match": 0.7,
+                "reward_weights": {...} }
+}
+```
+
+`export.glb` adds `node_map` (contract bone → the GLB node actually driven),
+`unmapped_bones`, `bone_aliases` and `posed: "end"`. It is self-describing on
+purpose: a consumer needs no other file to interpret the poses.
+
+### ⚠️ Do not send the GLB to a language model
+
+A real Meshy export is ~3.6MB — roughly 5M characters base64'd, essentially all
+mesh, textures and skin weights that no model can act on. `export.json` is ~3KB
+and carries every fact the animation step needs. A test pins it under 20KB.
+
+### Next step: animation (not built)
+
+Turning start → end into in-between keyframes is the same shape as an existing
+interface:
+
+```
+(start pose, end pose, intent) -> Clip
+```
+
+`Clip` already exists and the viewport already plays it, so the natural home is
+a fourth provider alongside `Rigger`/`Poser`/`Trainer` rather than a new
+pipeline. Worth knowing before building it:
+
+- **Feed it `export.json`, not the GLB.** The bone list, `pose_format` and
+  `rest_offsets` in that document are what make a pose interpretable.
+- **The rotation conventions above are not guessable.** Put them in the prompt,
+  or the model will invent a sign convention and limbs will bend backwards.
+- **Ask for a `Clip`.** `validate_clip()` then enforces the bone names,
+  normalises the quaternions and rejects out-of-order keyframes for free — the
+  same guard rail the LLM poser gets.
+- **Baking that clip into the GLB as a glTF `animation`** (channels + samplers)
+  is a separate, later job. Nothing currently writes one, and the viewport
+  deliberately ignores baked animations because they fight `applyPose`.
+
+### Known duplication
+
+The world-space retarget exists **twice**: `gltf.pose_glb` (Python, for export)
+and `#applyPoseGlb` in `static/js/viewport.js` (browser, for display). Same
+maths, two implementations — change one and you must change the other.
+`tests/test_export.py` pins the Python side and asserts the two normalisers
+agree, but it cannot see the browser. The eventual fix is to compute poses
+once, server-side, and have the viewport apply what it is handed.
+
 ## Interfaces
 
 ```python
@@ -225,6 +312,8 @@ PROVIDER_POSING=real flask --app app run
 | POST | `/api/training/runs` | `{avatar_id, target_clip_id, config, speed}` |
 | GET | `/api/training/runs/<id>/events` | SSE: `episode` events, then `end` |
 | POST | `/api/training/runs/<id>/{stop,pause,resume,speed}` | control |
+| GET | `/api/training/runs/<id>/export.glb` | posed GLB + embedded metadata |
+| GET | `/api/training/runs/<id>/export.json` | poses + provenance, for the animation step |
 | GET/POST | `/api/behaviours` | named behaviours |
 
 - Rigging and pose generation return a job immediately; poll `/api/jobs/<id>`.
