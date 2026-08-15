@@ -218,6 +218,7 @@ PROVIDER_POSING=real flask --app app run
 | GET | `/api/avatars/<id>` | avatar record including rig |
 | GET | `/api/avatars/<id>/image` | the original drawing |
 | GET | `/api/avatars/<id>/glb` | GLB bytes when `format == "glb"` |
+| POST | `/api/avatars/<id>/tpose` | job → forward-facing, T-pose, transparent PNG (from the last `/render` output if any, else the raw sketch) |
 | POST | `/api/avatars/<id>/poses` | `{prompt}` → job → clip |
 | GET | `/api/clips/<id>` | a clip |
 | GET | `/api/jobs/<id>` | `{status, progress, message, result, error}` |

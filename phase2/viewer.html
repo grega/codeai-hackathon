@@ -1,0 +1,29 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Animation Preview</title>
+<script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #1e1e1e; }
+  model-viewer { width: 100%; height: 100%; }
+</style>
+</head>
+<body>
+<script>
+  const params = new URLSearchParams(window.location.search);
+  const src = params.get("src") || "rigged_human.glb";
+  const anim = params.get("anim");
+
+  const mv = document.createElement("model-viewer");
+  mv.src = src;
+  mv.setAttribute("camera-controls", "");
+  mv.setAttribute("autoplay", "");
+  mv.setAttribute("shadow-intensity", "1");
+  mv.setAttribute("exposure", "1");
+  mv.cameraOrbit = "0deg 75deg 2.5m";
+  if (anim) mv.setAttribute("animation-name", anim);
+  document.body.appendChild(mv);
+</script>
+</body>
+</html>

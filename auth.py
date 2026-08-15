@@ -43,10 +43,24 @@ class RateLimiter:
     the AWS bill.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, per_minute_attr: str = "LLM_RATE_PER_MINUTE",
+                 per_day_attr: str = "LLM_RATE_PER_DAY") -> None:
+        # Names, not values: read live off `config` on every check so a
+        # monkeypatched/reloaded config takes effect without rebuilding the
+        # limiter (tests rely on this for the default LLM_RATE_PER_* limiter).
+        self._per_minute_attr = per_minute_attr
+        self._per_day_attr = per_day_attr
         self._lock = threading.Lock()
         self._callers: dict[str, deque[float]] = {}
         self._global: deque[float] = deque()
+
+    @property
+    def _per_minute(self) -> int:
+        return getattr(config, self._per_minute_attr)
+
+    @property
+    def _per_day(self) -> int:
+        return getattr(config, self._per_day_attr)
 
     def check(self, identity: str) -> str | None:
         """Return None if allowed, or a message explaining the refusal."""
@@ -56,11 +70,11 @@ class RateLimiter:
             _evict(window, now - 60.0)
             _evict(self._global, now - 86400.0)
 
-            if len(window) >= config.LLM_RATE_PER_MINUTE:
-                return (f"Rate limit: {config.LLM_RATE_PER_MINUTE} requests per "
+            if len(window) >= self._per_minute:
+                return (f"Rate limit: {self._per_minute} requests per "
                         f"minute. Try again shortly.")
-            if len(self._global) >= config.LLM_RATE_PER_DAY:
-                return (f"Daily cap of {config.LLM_RATE_PER_DAY} requests reached "
+            if len(self._global) >= self._per_day:
+                return (f"Daily cap of {self._per_day} requests reached "
                         f"for this deployment.")
 
             window.append(now)
@@ -73,8 +87,8 @@ class RateLimiter:
             _evict(self._global, now - 86400.0)
             return {
                 "used_today": len(self._global),
-                "daily_limit": config.LLM_RATE_PER_DAY,
-                "per_minute_limit": config.LLM_RATE_PER_MINUTE,
+                "daily_limit": self._per_day,
+                "per_minute_limit": self._per_minute,
             }
 
 

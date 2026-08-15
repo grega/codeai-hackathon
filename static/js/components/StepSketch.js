@@ -2,11 +2,9 @@
 
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
-import { setAvatar, state, goTo } from "../store.js";
-import { AvatarCanvas } from "./AvatarCanvas.js";
+import { generatePosedAvatar, setAvatar, state, goTo } from "../store.js";
 
 export const StepSketch = {
-  components: { AvatarCanvas },
   setup() {
     const canvas = ref(null);
     const busy = ref(false);
@@ -14,8 +12,21 @@ export const StepSketch = {
     const message = ref("");
     const error = ref(null);
     const hasDrawing = ref(false);
+    const uploadCleaned = ref(false);
+    const renderPrompt = ref("");
+    const renderBusy = ref(false);
+    const renderProgress = ref(0);
+    const renderMessage = ref("");
+    const renderError = ref(null);
+    const renderedImage = ref(null);
+    const tool = ref("pen"); // "pen" | "eraser"
+    const undoStack = ref([]);
     let ctx = null;
     let drawing = false;
+
+    const PEN_WIDTH = 7;
+    const ERASER_WIDTH = 28;
+    const UNDO_HISTORY_LIMIT = 20;
 
     onMounted(() => {
       const el = canvas.value;
@@ -28,9 +39,24 @@ export const StepSketch = {
       ctx.fillRect(0, 0, el.width, el.height);
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
-      ctx.strokeStyle = "#1e293b";
-      ctx.lineWidth = 7;
     });
+
+    function pushUndoSnapshot() {
+      const el = canvas.value;
+      undoStack.value.push({
+        imageData: ctx.getImageData(0, 0, el.width, el.height),
+        hadDrawing: hasDrawing.value,
+      });
+      if (undoStack.value.length > UNDO_HISTORY_LIMIT) undoStack.value.shift();
+    }
+
+    function undo() {
+      const entry = undoStack.value.pop();
+      if (!entry) return;
+      ctx.putImageData(entry.imageData, 0, 0);
+      hasDrawing.value = entry.hadDrawing;
+      uploadCleaned.value = false;
+    }
 
     function positionOf(event) {
       const rect = canvas.value.getBoundingClientRect();
@@ -41,8 +67,12 @@ export const StepSketch = {
     }
 
     function start(event) {
+      pushUndoSnapshot();
       drawing = true;
       hasDrawing.value = true;
+      uploadCleaned.value = false;
+      ctx.strokeStyle = tool.value === "eraser" ? "#ffffff" : "#1e293b";
+      ctx.lineWidth = tool.value === "eraser" ? ERASER_WIDTH : PEN_WIDTH;
       const { x, y } = positionOf(event);
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -62,25 +92,83 @@ export const StepSketch = {
       ctx.fillStyle = "#ffffff";
       ctx.fillRect(0, 0, canvas.value.width, canvas.value.height);
       hasDrawing.value = false;
+      uploadCleaned.value = false;
     }
 
-    function loadFile(event) {
+    function clearCanvas() {
+      pushUndoSnapshot();
+      clear();
+    }
+
+    function drawBlobToCanvas(blob) {
+      return new Promise((resolve, reject) => {
+        const image = new Image();
+        image.onload = () => {
+          clear();
+          // Fit the upload inside the square without distorting it.
+          const scale = Math.min(canvas.value.width / image.width,
+                                 canvas.value.height / image.height);
+          const w = image.width * scale;
+          const h = image.height * scale;
+          ctx.drawImage(image, (canvas.value.width - w) / 2,
+                        (canvas.value.height - h) / 2, w, h);
+          hasDrawing.value = true;
+          URL.revokeObjectURL(image.src);
+          resolve();
+        };
+        image.onerror = () => reject(new Error("Failed to load the selected file"));
+        image.src = URL.createObjectURL(blob);
+      });
+    }
+
+    async function cleanUpDrawing(blob) {
+      message.value = "Cleaning up your drawing...";
+      try {
+        const { extractLineDrawing } = await import("/js/pipeline/pipeline.js");
+        const { outputBlob } = await extractLineDrawing(blob);
+        return { blob: outputBlob, cleaned: true };
+      } catch (err) {
+        // A pipeline bug shouldn't block Phase 1 — fall back to the raw capture.
+        console.warn("Line-extraction pipeline failed, using raw drawing:", err);
+        return { blob, cleaned: false };
+      } finally {
+        message.value = "";
+      }
+    }
+
+    async function loadFile(event) {
       const file = event.target.files?.[0];
       if (!file) return;
-      const image = new Image();
-      image.onload = () => {
-        clear();
-        // Fit the upload inside the square without distorting it.
-        const scale = Math.min(canvas.value.width / image.width,
-                               canvas.value.height / image.height);
-        const w = image.width * scale;
-        const h = image.height * scale;
-        ctx.drawImage(image, (canvas.value.width - w) / 2,
-                      (canvas.value.height - h) / 2, w, h);
-        hasDrawing.value = true;
-        URL.revokeObjectURL(image.src);
-      };
-      image.src = URL.createObjectURL(file);
+      pushUndoSnapshot();
+      busy.value = true;
+      error.value = null;
+      try {
+        const { blob, cleaned } = await cleanUpDrawing(file);
+        await drawBlobToCanvas(blob);
+        // Skip cleaning it again on submit — the canvas already holds the
+        // pipeline's output (or, if the pipeline failed, the raw upload).
+        uploadCleaned.value = cleaned;
+      } catch (err) {
+        error.value = err.message;
+      } finally {
+        busy.value = false;
+        event.target.value = "";
+      }
+    }
+
+    async function createAvatarFromCanvas(onProgress) {
+      const raw = await new Promise((resolve) =>
+        canvas.value.toBlob(resolve, "image/png"));
+      const blob = uploadCleaned.value ? raw : (await cleanUpDrawing(raw)).blob;
+      const avatar = await api.createAvatar(blob, onProgress);
+      setAvatar(avatar);
+      // A previous render belonged to the old drawing.
+      renderedImage.value = null;
+      renderError.value = null;
+      // Fire-and-forget: tracked on the shared store so it survives
+      // navigating on to "Teach" rather than blocking this step's caller.
+      generatePosedAvatar();
+      return avatar;
     }
 
     async function bringToLife() {
@@ -88,13 +176,10 @@ export const StepSketch = {
       error.value = null;
       progress.value = 0;
       try {
-        const blob = await new Promise((resolve) =>
-          canvas.value.toBlob(resolve, "image/png"));
-        const avatar = await api.createAvatar(blob, (fraction, msg) => {
+        await createAvatarFromCanvas((fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
         });
-        setAvatar(avatar);
         goTo("pose");
       } catch (err) {
         error.value = err.message;
@@ -103,10 +188,37 @@ export const StepSketch = {
       }
     }
 
+    async function renderImage() {
+      if (renderBusy.value || !renderPrompt.value.trim()
+          || (!hasDrawing.value && !state.avatar)) return;
+      renderBusy.value = true;
+      renderError.value = null;
+      renderProgress.value = 0;
+      try {
+        const avatar = state.avatar || await createAvatarFromCanvas(
+          (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
+        renderProgress.value = 0;
+        const result = await api.renderAvatar(avatar.id, renderPrompt.value,
+          (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
+        renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
+        // The T-pose download should reflect what was just designed here,
+        // not the plain sketch it started from — redo it against the render.
+        generatePosedAvatar();
+      } catch (err) {
+        renderError.value = err.message;
+      } finally {
+        renderBusy.value = false;
+      }
+    }
+
     return {
       canvas, busy, progress, message, error, hasDrawing, state,
-      start, move, end, clear, loadFile, bringToLife,
+      renderPrompt, renderBusy, renderError, renderedImage,
+      tool, undoStack,
+      start, move, end, clearCanvas, loadFile, bringToLife, renderImage, undo,
       percent: computed(() => Math.round(progress.value * 100)),
+      renderPercent: computed(() => Math.round(renderProgress.value * 100)),
+      renderMessage,
     };
   },
   template: `
@@ -122,34 +234,76 @@ export const StepSketch = {
           <canvas ref="canvas" class="sketchpad"
                   @pointerdown="start" @pointermove="move"
                   @pointerup="end" @pointerleave="end"></canvas>
-          <div class="row">
-            <button class="ghost" @click="clear">Clear</button>
-            <label class="ghost file">
-              Upload a photo
-              <input type="file" accept="image/*" @change="loadFile" hidden>
-            </label>
-            <button class="primary" :disabled="!hasDrawing || busy"
-                    @click="bringToLife">
-              {{ busy ? 'Working…' : 'Bring it to life' }}
+          <div class="tool-toggle">
+            <button :class="{ active: tool === 'pen' }" title="Pen"
+                    aria-label="Pen" @click="tool = 'pen'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .622.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+                <path d="m15 5 4 4"/>
+              </svg>
+            </button>
+            <button :class="{ active: tool === 'eraser' }" title="Eraser"
+                    aria-label="Eraser" @click="tool = 'eraser'">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   stroke-linejoin="round" aria-hidden="true">
+                <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21"/>
+                <path d="M22 21H7"/>
+                <path d="m5 11 9 9"/>
+              </svg>
             </button>
           </div>
+          <div class="row">
+            <button class="ghost" :disabled="!undoStack.length" @click="undo">Undo</button>
+            <button class="ghost" @click="clearCanvas">Clear</button>
+            <label class="ghost file">
+              Upload a photo
+              <input type="file" accept="image/*" :disabled="busy"
+                     @change="loadFile" hidden>
+            </label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h4>Rendering prompt</h4>
+          <div class="prompt-row">
+            <input v-model="renderPrompt" type="text"
+                   placeholder="e.g. a friendly robot with a cape, bold colors"
+                   @keyup.enter="renderImage" :disabled="renderBusy">
+            <button class="primary"
+                    :disabled="renderBusy || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
+                    @click="renderImage">
+              {{ renderBusy ? 'Rendering…' : 'Render' }}
+            </button>
+          </div>
+          <p class="muted" v-if="!hasDrawing && !state.avatar">Draw something
+             on the left first.</p>
+          <p class="muted" v-else>Sends your line drawing and this prompt to
+             a Bedrock image model and shows what it renders.</p>
+
+          <div v-if="renderBusy" class="progress">
+            <div class="progress-bar" :style="{ width: renderPercent + '%' }"></div>
+            <span>{{ renderMessage }}</span>
+          </div>
+          <p v-if="renderError" class="error">{{ renderError }}</p>
+
+          <img v-if="renderedImage" :src="renderedImage" alt="Rendered avatar"
+               class="rendered-image">
+
+          <button class="primary" :disabled="!hasDrawing || busy"
+                  @click="bringToLife">
+            {{ busy ? 'Working…' : 'Bring it to life' }}
+          </button>
+          <p class="muted">Builds a rigged skeleton from your drawing and
+             takes you to the Teach step.</p>
 
           <div v-if="busy" class="progress">
             <div class="progress-bar" :style="{ width: percent + '%' }"></div>
             <span>{{ message }}</span>
           </div>
           <p v-if="error" class="error">{{ error }}</p>
-        </div>
-
-        <div class="panel">
-          <AvatarCanvas v-if="state.avatar" :rig="state.avatar.rig"
-                        label="Your avatar" />
-          <div v-else class="placeholder">
-            <p>Your avatar will appear here once you've drawn something.</p>
-            <p class="muted">Behind the scenes: your drawing goes to a model
-               that works out where the head, arms and legs are, then fits a
-               skeleton to them. That skeleton is what you'll train.</p>
-          </div>
         </div>
       </div>
     </section>
