@@ -3,10 +3,8 @@
 import { computed, onMounted, ref } from "vue";
 import { api } from "../api.js";
 import { setAvatar, state, goTo } from "../store.js";
-import { AvatarCanvas } from "./AvatarCanvas.js";
 
 export const StepSketch = {
-  components: { AvatarCanvas },
   setup() {
     const canvas = ref(null);
     const busy = ref(false);
@@ -128,22 +126,27 @@ export const StepSketch = {
       }
     }
 
+    async function createAvatarFromCanvas(onProgress) {
+      const raw = await new Promise((resolve) =>
+        canvas.value.toBlob(resolve, "image/png"));
+      const blob = uploadCleaned.value ? raw : (await cleanUpDrawing(raw)).blob;
+      const avatar = await api.createAvatar(blob, onProgress);
+      setAvatar(avatar);
+      // A previous render belonged to the old drawing.
+      renderedImage.value = null;
+      renderError.value = null;
+      return avatar;
+    }
+
     async function bringToLife() {
       busy.value = true;
       error.value = null;
       progress.value = 0;
       try {
-        const raw = await new Promise((resolve) =>
-          canvas.value.toBlob(resolve, "image/png"));
-        const blob = uploadCleaned.value ? raw : (await cleanUpDrawing(raw)).blob;
-        const avatar = await api.createAvatar(blob, (fraction, msg) => {
+        await createAvatarFromCanvas((fraction, msg) => {
           progress.value = fraction;
           message.value = msg;
         });
-        setAvatar(avatar);
-        // A previous render belonged to the old drawing.
-        renderedImage.value = null;
-        renderError.value = null;
         goTo("pose");
       } catch (err) {
         error.value = err.message;
@@ -153,12 +156,16 @@ export const StepSketch = {
     }
 
     async function renderImage() {
-      if (!state.avatar || renderBusy.value || !renderPrompt.value.trim()) return;
+      if (renderBusy.value || !renderPrompt.value.trim()
+          || (!hasDrawing.value && !state.avatar)) return;
       renderBusy.value = true;
       renderError.value = null;
       renderProgress.value = 0;
       try {
-        const result = await api.renderAvatar(state.avatar.id, renderPrompt.value,
+        const avatar = state.avatar || await createAvatarFromCanvas(
+          (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
+        renderProgress.value = 0;
+        const result = await api.renderAvatar(avatar.id, renderPrompt.value,
           (fraction, msg) => { renderProgress.value = fraction; renderMessage.value = msg; });
         renderedImage.value = `data:image/${result.output_format};base64,${result.image_base64}`;
       } catch (err) {
@@ -197,17 +204,7 @@ export const StepSketch = {
               <input type="file" accept="image/*" :disabled="busy"
                      @change="loadFile" hidden>
             </label>
-            <button class="primary" :disabled="!hasDrawing || busy"
-                    @click="bringToLife">
-              {{ busy ? 'Working…' : 'Bring it to life' }}
-            </button>
           </div>
-
-          <div v-if="busy" class="progress">
-            <div class="progress-bar" :style="{ width: percent + '%' }"></div>
-            <span>{{ message }}</span>
-          </div>
-          <p v-if="error" class="error">{{ error }}</p>
         </div>
 
         <div class="panel">
@@ -216,13 +213,14 @@ export const StepSketch = {
             <input v-model="renderPrompt" type="text"
                    placeholder="e.g. a friendly robot with a cape, bold colors"
                    @keyup.enter="renderImage" :disabled="renderBusy">
-            <button class="primary" :disabled="!state.avatar || renderBusy || !renderPrompt.trim()"
+            <button class="primary"
+                    :disabled="renderBusy || !renderPrompt.trim() || (!hasDrawing && !state.avatar)"
                     @click="renderImage">
               {{ renderBusy ? 'Rendering…' : 'Render' }}
             </button>
           </div>
-          <p class="muted" v-if="!state.avatar">Bring your drawing to life
-             first, then render it here.</p>
+          <p class="muted" v-if="!hasDrawing && !state.avatar">Draw something
+             on the left first.</p>
           <p class="muted" v-else>Sends your line drawing and this prompt to
              a Bedrock image model and shows what it renders.</p>
 
@@ -235,8 +233,18 @@ export const StepSketch = {
           <img v-if="renderedImage" :src="renderedImage" alt="Rendered avatar"
                class="rendered-image">
 
-          <AvatarCanvas v-if="state.avatar" :rig="state.avatar.rig"
-                        label="Your avatar" />
+          <button class="primary" :disabled="!hasDrawing || busy"
+                  @click="bringToLife">
+            {{ busy ? 'Working…' : 'Bring it to life' }}
+          </button>
+          <p class="muted">Builds a rigged skeleton from your drawing and
+             takes you to the Teach step.</p>
+
+          <div v-if="busy" class="progress">
+            <div class="progress-bar" :style="{ width: percent + '%' }"></div>
+            <span>{{ message }}</span>
+          </div>
+          <p v-if="error" class="error">{{ error }}</p>
         </div>
       </div>
     </section>
