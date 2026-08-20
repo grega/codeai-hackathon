@@ -9,8 +9,28 @@ The experience now runs end to end:
 draw -> render image -> rig -> teach -> train -> play -> render a WebM video
 ```
 
-Go to the [project wiki](https://github.com/grega/codeai-hackathon/wiki) for
-background and design notes.
+## Background
+
+Audience: 11-14
+
+A prototype of an in-browser generative AI/ML learning experience for school kids.
+
+Think a Tamagotchi that the young person, or user, can create and train, which can then be presented novel environments for it to navigate in some way. 
+
+The input is freeform, an image supplied by the user, and the output is a 2D model. This would be the user's avatar. This can be offloaded to an SLM / LLM. 
+
+This avatar would be rigged, and then could be trained to perform a bunch of actions. The training is an interactive part of the whole experience for the user - learning how training works, and understanding how this maps to the actual outcome. Animation should be mapped to behaviour. 
+
+Phases:
+
+1. User sketches (eg a stick person), we translate this into a 2D model using an LLM, the 2D model is auto-rigged. Output is rigged GLB.
+2. Input is GLB, take a prompt eg "waves arms in air" and put it through an LLM, output is a pose / a set of poses (as a model)
+3. Now we can send items to a reinforcement model: 1 neutral pose and 2. desired pose
+4. Desired pose is given a reward function, points awarded for a pose which is close / the same as the desired one. This needs to be visualised as a learning activity.
+
+For reference, we can start with @cindyloo's animation pipeline <a href="https://github.com/cindyloo/generative-ai-server">here</a>
+
+We can also reference Faraz Faraqi's paper on InstructMesh <a href="https://groups.csail.mit.edu/hcie/files/research-projects/xspine/xspine.pdf">here</a>.
 
 ## Setup
 
